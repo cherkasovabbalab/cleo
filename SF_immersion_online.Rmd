@@ -1,0 +1,1250 @@
+---
+title: "Sensory feedback"
+author: "MC"
+date: "November 19, 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+Load packages
+```{r,include=FALSE}
+
+rm(list=ls()) #clear env
+library(lme4)
+library(lattice)
+library(lmerTest)
+library(emmeans)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(influence.ME)
+library(gmodels)#CI
+library(corrplot)
+library(arm)
+library(gridExtra)
+library(sjPlot)
+library(stringr)
+library(httr)
+#library(OSF2R)
+library(osfr)
+library(naniar)
+library(QuantPsyc) #lm.beta() for standardized betas
+library(AER)
+library(mclogit)
+library(fitdistrplus)
+```
+
+Set up plotting theme
+
+```{r}
+my_theme <- theme(
+  axis.line.x= element_line(colour="black",size=0.5),
+  axis.line.y= element_line(colour="black",size=0.5),
+  plot.title = element_text(size=25, face="bold"),
+  #axis.title.x = element_blank(),
+  axis.title.x = element_text(size=20, face="bold"),
+  axis.title.y = element_text(size=20, face="bold"),
+  axis.text.x = element_text(size=18,face="bold",color="black"),
+  axis.text.y = element_text(size=18,face="bold",color="black"),
+  legend.title = element_blank(),
+  legend.text = element_text(size=15,face="bold"),
+  legend.key= element_blank(),
+  panel.background= element_rect(colour="white",fill="white"),
+  panel.border= element_blank(),
+  #panel.border= element_rect(colour="black",fill=NA,size=2),
+  strip.text.x = element_text(size=20, face="bold"),
+  strip.text.y = element_text(size=20, face="bold"),
+  strip.background = element_rect(colour="white",fill="white"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+)
+
+```
+
+Read in Qualtrics data
+
+```{r}
+df <- read.csv("C:/Users/lsbcherkasovalab/Documents/Celo/Cleo_January 17, 2022_14.40.csv") #BE SURE TO EXPORT WITH 'USE NUMERIC VALUES'
+```
+
+Read in cleo_data files directly from OSF doesn't work for now. Files need to be downloaded to local machine first.
+
+```{r}
+# RPPmaster <- readOSF("https://osf.io/8nh5p/files/", read.dat, sep ="|", header = FALSE, dec =".") #this command doesn't work
+
+# the following only manages to download 10 files into the temp directory
+# cleo_data <- osf_retrieve_node("https://osf.io/8nh5p")
+# cleo_data_files <- osf_ls_files(cleo_data)
+# fileLocation <- osf_download(cleo_data_files, path=tempdir())
+# files <- fileLocation$local_path
+```
+
+Look at individual data files
+
+```{}
+cleodata.S <- data.frame()
+f <- "C:/Users/lsbcherkasovalab/Documents/Celo/cleo_data_745912"
+f <- read.delim(f,sep ="|", header = FALSE, dec =".")
+    for (i in 1:200){
+    spin.i <- str_split(f[,i],",")
+    spin.i <- spin.i[[1]]
+    date <- spin.i[3]
+    version <- spin.i[4]
+    spin_start_time <- as.numeric(spin.i[6])
+    time_from_pr_spin <- as.numeric(spin.i[7])
+    spin_completion_time <- as.numeric(spin.i[8])
+    spin_completion_time_min <- spin_completion_time/60
+    reels_plus_fb <- as.numeric(spin.i[9])
+    spin_init_latency <- as.numeric(spin.i[12])
+    cumu_spin_init_lat <- as.numeric(spin.i[13])
+    bet_per_line <- as.numeric(spin.i[14])
+    lines <- as.numeric(spin.i[15])
+    total_bet <- as.numeric(spin.i[16])
+    win_loss <- as.numeric(spin.i[17])
+    starting_credits <- spin.i[18]
+    st_cr_minus_bet<- spin.i[19]
+    final_credits <- spin.i[20]
+    hit_symbols_values <- spin.i[25]
+    hit_symbols <- spin.i[26]
+    hit_symbol_yield <- spin.i[27]
+    spin.attributes <- cbind(id,i,date,version, spin_start_time,time_from_pr_spin,spin_completion_time,spin_completion_time_min,reels_plus_fb,spin_init_latency,cumu_spin_init_lat,bet_per_line,lines,total_bet,win_loss,starting_credits,st_cr_minus_bet,final_credits,hit_symbols_values,hit_symbols,hit_symbol_yield)
+  cleodata.S <- rbind(cleodata.S,spin.attributes)
+  }
+
+cleodata.S$reels_plus_fb <- as.numeric(cleodata.S$reels_plus_fb)
+cleodata.S$final_credits <- as.numeric(cleodata.S$final_credits)
+hist(cleodata.S$reels_plus_fb, breaks = 200)
+mean(cleodata.S$reels_plus_fb)
+(cleodata.S$final_credits[200]-4000)/100
+cleodata.S$version[200]
+```
+
+Read in cleo_data files
+
+```{r, include=FALSE}
+cleo.df <- data.frame()
+
+files <- dir("C:/Users/lsbcherkasovalab/Documents/Celo/osfstorage-archive/", full.names = TRUE)
+
+for (file in files){
+  id <- substr(file,71,76)
+  f <- read.delim(file,sep ="|", header = FALSE, dec =".")
+    for (i in 1:200){
+    spin.i <- str_split(f[,i],",")
+    spin.i <- spin.i[[1]]
+    date <- spin.i[3]
+    version <- spin.i[4]
+    spin_start_time <- as.numeric(spin.i[6])
+    time_from_pr_spin <- as.numeric(spin.i[7])
+    spin_completion_time <- as.numeric(spin.i[8])
+    spin_completion_time_min <- spin_completion_time/60
+    reels_plus_fb <- as.numeric(spin.i[9])
+    spin_init_latency <- as.numeric(spin.i[12])
+    cumu_spin_init_lat <- as.numeric(spin.i[13])
+    bet_per_line <- as.numeric(spin.i[14])
+    lines <- as.numeric(spin.i[15])
+    total_bet <- as.numeric(spin.i[16])
+    win_loss <- as.numeric(spin.i[17])
+    starting_credits <- spin.i[18]
+    st_cr_minus_bet<- spin.i[19]
+    final_credits <- spin.i[20]
+    hit_symbols_values <- spin.i[25]
+    hit_symbols <- spin.i[26]
+    hit_symbol_yield <- spin.i[27]
+    spin.attributes <- cbind(id,i,date,version, spin_start_time,time_from_pr_spin,spin_completion_time,spin_completion_time_min,reels_plus_fb,spin_init_latency,cumu_spin_init_lat,bet_per_line,lines,total_bet,win_loss,starting_credits,st_cr_minus_bet,final_credits,hit_symbols_values,hit_symbols,hit_symbol_yield)
+  cleo.df <- rbind(cleo.df,spin.attributes)
+  }
+}
+
+cleo.df[,5:18] <- sapply(cleo.df[,5:18],as.numeric)
+names(cleo.df)[2] <- "spin"
+cleo.df$spin <- as.numeric(cleo.df$spin)
+
+cleo.df$SF <- ifelse(cleo.df$version==" Slot-Simulator-M-Minus"| cleo.df$version==" Slot-Simulator-I-Minus","minus","plus")
+cleo.df$sequence <- ifelse(cleo.df$version==" Slot-Simulator-M-Minus"|cleo.df$version==" Slot-Simulator-M-Plus","M","I")
+
+summary <- cleo.df %>% 
+  group_by(id) %>% 
+  summarise(mean_reels_plus_fb=mean(reels_plus_fb), SF=first(SF), seq=first(sequence), outcome=last(final_credits), mean_bet_size=mean(bet_per_line))
+
+hist(summary$mean_reels_plus_fb, breaks=200, xlim=c(5,55))
+hist(summary$mean_bet_size)
+write.csv(summary, file="cleo_osf.csv")
+
+nolongspins <- summary %>% 
+  filter(mean_reels_plus_fb<=10)
+
+```
+
+Filter Qualtrics data to include those with Cleo data. Do some cleaning and questionnaire scoring
+
+```{r}
+
+qualtrics.filtered <- df %>% 
+  filter(Random.ID %in% nolongspins$id) %>%  
+  filter(Q142=="" & Q141=="2") %>% #attention checks; if the data are exported form Qualtrics using text, a problem can occur at this point 
+  dplyr::select(!c(cleo_data, cleo_ui))
+
+which(!nolongspins$id %in% df$Random.ID) # IDs " 29370" " 48907" "449479" "600217" are missing from Qualtrics - probably mislabeled
+nolongspins$id[which(!nolongspins$id %in% df$Random.ID)]
+
+qualtrics.filtered[,39:179] <- sapply(qualtrics.filtered[,39:179],as.numeric)
+qualtrics.filtered[,192:200] <- sapply(qualtrics.filtered[,192:200],as.numeric)
+
+# Rename vars
+qualtrics.filtered <- qualtrics.filtered %>% 
+  rename(
+    age = Q4,
+    gender = Q5,
+    employment=Q8,
+    income = Q10,
+    ethnicity=Q12,
+    country=Q16,
+    lottery.since=Q18,
+    lottery.bf=Q64,
+    daily.lottery.since=Q19,
+    daily.lottery.fb=Q65,
+    scratch.since=Q20,
+    scratch.bf=Q66,
+    raffle.since=Q22,
+    raffle.bf=Q67,
+    horses.since=Q24,
+    horses.bf=Q68,
+    bingo.since=Q25,
+    bingo.bf=Q69,
+    fantasysports.since=Q26,
+    fantasysports.bf=Q70,
+    casino.themed.app.since=Q27,
+    casino.themed.app.bf=Q32,
+    online.slots.since=Q35,
+    online.slots.bf=Q36,
+    internet.since=Q58,
+    internet.bf=Q59,
+    casino.yes.no=Q29,
+    casino.slots= Q30,
+    casino.slots.bf=Q33,
+    poker.since=Q37,
+    poker.bf=Q34,
+    roulette.since=Q38,
+    roulette.bf=Q39,
+    keno.since=Q40,
+    keno.bf=Q41,
+    craps.since=Q42,
+    craps.bf=Q43,
+    egm.notslots.since=Q44,
+    egm.notslots.bf=Q47,
+    sports.lottery.since=Q48,
+    sports.lottery.bf=Q49,
+    sports.pools.since=Q50,
+    sports.pools.bf=Q52,
+    card.board.games=Q53,
+    card.board.bf=Q54,
+    games.of.skills.since=Q55,
+    games.of.skills.bf=Q56,
+    sports.bet.since=Q60,
+    sports.bet.bf=Q61,
+    stocks.since=Q62,
+    stocks.bf=Q63,
+    win.est=Q137,
+    pleased=Q82,
+    continue.play=Q83,
+    game.enjoyable=Q84,
+    GEQ3=Q85,
+    DQ4=Q86,
+    DQ5=Q87,
+    GEQ6=Q88,
+    DQ7=Q89,
+    DQ8=Q90,
+    DQ9=Q91,
+    id=Random.ID
+  )
+
+
+# Summary gambling experience
+gam_exp.summary <- qualtrics.filtered %>% 
+  group_by(experienced,SF) %>% 
+  summarise(mean.lottery=mean(lottery.since,na.rm=TRUE), sd.lottery=sd(lottery.since,na.rm=TRUE), mean.daily.lottery=mean(daily.lottery.since,na.rm=TRUE),sd.daily.lottery=sd(daily.lottery.since,na.rm=TRUE), mean.scratch=mean(scratch.since,na.rm=TRUE), sd.scratch=sd(scratch.since,na.rm=TRUE),mean.raffle=mean(raffle.since,na.rm=TRUE), sd.raffle=sd(raffle.since,na.rm=TRUE), mean.horses=mean(horses.since,na.rm=TRUE), sd.horses=sd(horses.since,na.rm=TRUE), mean.bingo=mean(bingo.since,na.rm=TRUE), sd.bingo=sd(bingo.since,na.rm=TRUE), mean.fantasysports=mean(fantasysports.since,na.rm=TRUE), sd.fantasysports=sd(fantasysports.since,na.rm=TRUE), mean.casino.themed.app=mean(casino.themed.app.since,na.rm=TRUE), sd.casino.themed.app=sd(casino.themed.app.since,na.rm=TRUE), mean.online.slots=mean(online.slots.since,na.rm=TRUE), sd.online.slots=sd(online.slots.since,na.rm=TRUE), mean.internet=mean(internet.since,na.rm=TRUE), sd.internet=sd(internet.since,na.rm=TRUE), mean.casino.slots=mean(casino.slots,na.rm=TRUE), sd.casino.slots=sd(casino.slots,na.rm=TRUE), mean.poker=mean(poker.since,na.rm=TRUE), sd.poker=sd(poker.since,na.rm=TRUE), mean.roulette=mean( roulette.since,na.rm=TRUE), sd.roulette=sd( roulette.since,na.rm=TRUE),mean.keno=mean(keno.since,na.rm=TRUE), sd.keno=sd(keno.since,na.rm=TRUE),mean.craps=mean(craps.since,na.rm=TRUE), sd.craps=sd(craps.since,na.rm=TRUE), mean.egm.notslots=mean(egm.notslots.since,na.rm=TRUE), sd.egm.notslots=sd(egm.notslots.since,na.rm=TRUE),mean.sports.lottery=mean(sports.lottery.since,na.rm=TRUE), sd.sports.lottery=sd(sports.lottery.since,na.rm=TRUE),mean.sports.pools=mean(sports.pools.since,na.rm=TRUE), sd.sports.pools=sd(sports.pools.since,na.rm=TRUE), mean.card.board.games=mean(card.board.games,na.rm=TRUE), sd.card.board.games=sd(card.board.games,na.rm=TRUE), mean.games.of.skills=mean(games.of.skills.since,na.rm=TRUE), sd.games.of.skills=sd(games.of.skills.since,na.rm=TRUE), mean.sports.bet=mean(sports.bet.since,na.rm=TRUE), sd.sports.bet=sd(sports.bet.since,na.rm=TRUE), mean.stocks=mean(stocks.since,na.rm=TRUE), sd.stocks=sd(stocks.since,na.rm=TRUE))
+
+write.csv(gam_exp.summary,"gam_exp.summary.csv")
+
+
+
+# Re-code CPGI
+vars <- c(44,46,48,50,52,54,56,58,60,62,65,67,69,71,73,75,77,79,81,83,85,87)
+for (i in vars){
+  qualtrics.filtered[,i] <- ifelse(qualtrics.filtered[,i]==1,7,
+            ifelse(qualtrics.filtered[,i]==2,6,
+                   ifelse(qualtrics.filtered[,i]==3,5,
+                          ifelse(qualtrics.filtered[,i]==4,4,
+                                 ifelse(qualtrics.filtered[,i]==5,3,
+                                        ifelse(qualtrics.filtered[,i]==6,2,
+                                               ifelse(qualtrics.filtered[,i]==7,1,0)))))))
+}
+
+
+
+nolongspins.filt<-nolongspins %>% filter(id %in% qualtrics.filtered$id)
+#Add SF and Sequence
+qualtrics.filtered <- inner_join(qualtrics.filtered, nolongspins.filt, by="id")
+qualtrics.filtered[65:76][is.na(qualtrics.filtered[65:76])] <- 0
+
+#PGSI: Q72 - Q80; for PGSI, we are subtracting 1 from the score rather than recoding
+qualtrics.filtered$pgsi <- as.numeric(qualtrics.filtered$Q72)-1+as.numeric(qualtrics.filtered$Q73)-1+as.numeric(qualtrics.filtered$Q74)-1+as.numeric(qualtrics.filtered$Q75)-1+as.numeric(qualtrics.filtered$Q76)-1+as.numeric(qualtrics.filtered$Q77)-1+as.numeric(qualtrics.filtered$Q78)-1+as.numeric(qualtrics.filtered$Q79)-1+as.numeric(qualtrics.filtered$Q80)-1
+
+#CPGI
+qualtrics.filtered <- qualtrics.filtered %>% 
+  mutate(cgpi.total.since = as.numeric(daily.lottery.since)+as.numeric(scratch.since)+as.numeric(raffle.since)+as.numeric(horses.since)+as.numeric(bingo.since)+as.numeric(fantasysports.since)+as.numeric(casino.themed.app.since)+as.numeric(online.slots.since)+as.numeric(internet.since)+as.numeric(casino.slots)+as.numeric(poker.since)+as.numeric(roulette.since)+as.numeric(keno.since)+as.numeric(craps.since)+as.numeric(egm.notslots.since)+as.numeric(sports.lottery.since)+as.numeric(sports.pools.since)+as.numeric(card.board.games)+as.numeric(games.of.skills.since)+as.numeric(sports.bet.since)+as.numeric(stocks.since)) %>% 
+  mutate(cgpi.online.since = as.numeric(casino.themed.app.since)+as.numeric(online.slots.since)+as.numeric(internet.since))
+
+
+#PANAS: positive: 3,5,7,8,10; negative: 1,2,4,6,9 (add up item scores); we are just subtracting 1 rather than re-coding everything
+qualtrics.filtered<-qualtrics.filtered %>% 
+  mutate(positive = Q95-1+Q97-1+Q99-1+Q100-1+Q102-1) %>% 
+  mutate(negative = Q93-1+Q94-1+Q96-1+Q98-1+Q101-1)
+
+#Immersion: as per Murch et al, 2020, GEQ + DQ mean scores calculated; we are just subtracting 1 rather than re-coding everything
+qualtrics.filtered<-qualtrics.filtered %>% 
+  mutate(avg_immersion = (GEQ3-1+DQ4-1+DQ5-1+GEQ6-1+DQ7-1+DQ7-1+DQ8-1+DQ9-1)/8) %>% 
+  mutate(flow = (GEQ3-1+GEQ6-1)/2) #flow
+
+#DASS: we are just subtracting 1 rather than re-coding everything
+qualtrics.filtered<-qualtrics.filtered %>% 
+  mutate(dass.stress = Q104-1+Q110-1+Q113-1+Q116-1+Q117-1+Q119-1+Q123-1) %>% 
+  mutate(dass.anxiety = Q105-1+Q107-1+Q112-1+Q114-1+Q120-1+Q124-1+Q125-1) %>% 
+  mutate(dass.depression = Q106-1+Q108-1+Q115-1+Q118-1+Q121-1+Q122-1+Q126-1)
+
+#ASRS
+qualtrics.filtered<-qualtrics.filtered %>% 
+  mutate(ASRS = as.numeric(Q128)-1+as.numeric(Q130)-1+as.numeric(Q131)-1+as.numeric(Q132)-1+as.numeric(Q133)-1)
+```
+Check for duplicates
+```{r}
+#Check for duplicate MTURK IDs (Q188)
+#qualtrics.filtered$Q188[duplicated(qualtrics.filtered$Q188)] #find all the duplicates
+
+# examine duplicates one by one if necessary
+#which(qualtrics.filtered$Q188=="A5NE8TWS8ZV7B") #rows 
+#id_r1 <- qualtrics.filtered$id[159] #find qualtrics IDs for both
+#id_r2 <- qualtrics.filtered$id[529]
+#cleo.df$spin[cleo.df$id==id_r1] #if both sets of data have 200 spins, only keep the first
+#cleo.df$spin[cleo.df$id==id_r2]
+#check for time stamp
+#qualtrics.filtered$StartDate[159]
+#qualtrics.filtered$StartDate[529]
+#qualtrics.filtered$RecordedDate[159]
+#qualtrics.filtered$RecordedDate[529] 
+
+# qualtrics.filtered <- qualtrics.filtered[-c(529),]
+
+```
+
+Create gambling experience variable
+
+```{r}
+# Identify experienced and novice gamblers
+qualtrics.filtered$experienced <- ifelse(qualtrics.filtered$cgpi.online.since>0,"AG","NG")
+
+```
+## Chi squared demographics
+
+```{r}
+M <- as.table(rbind(c(762, 327, 468), c(484, 239, 477)))
+
+males <- c(94,86,86,80)
+females <- c(46,40,55,58)
+gender.table <- rbind(males, females)
+dimnames(gender.table) <- list(gender=c("M","F"), group=c("sf-AG", "SF+AG", "SF-NG", "SF+NG"))
+
+chisq.test(gender.table)
+
+USA <- c(101,98,120,115)
+India <- c(19,18,9,12)
+Brazil <- c(9,7,5,6)
+Other <- c(11,5,8,6)
+country.table <- rbind(USA, India, Brazil, Other)
+dimnames(country.table) <- list(country=c("U","I","B","O"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
+
+chisq.test(Other)
+
+
+Lower <- c(82,72,82,94)
+Middle <- c(48,45,50,40)
+Upper <- c(10,11,10,5)
+income.table <- rbind(Lower,Middle,Upper)
+dimnames(income.table) <- list(income=c("I","M","U"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
+
+chisq.test(Upper)
+
+White <- c(96,83,115,111)
+Black <- c(4,5,2,8)
+Asian <- c(29,23,15,14)
+AmerInd <- c(0,0,3,2)
+Hispanic <- c(4,4,2,1)
+Other <- c(7,10,5,3)
+ethnicity.table <- rbind(White,Black,Asian,AmerInd,Hispanic,Other)
+dimnames(ethnicity.table) <- list(ethnicity=c("W","B","A","AI","H","O"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
+
+chisq.test(Other)
+
+Not <- c(1,5,14,10)
+WP <- c(97,91,98,91)
+WSE <- c(39,29,29,28)
+
+chisq.test(WSE)
+
+```
+
+## Examine gambling experience variable distribution. Run MANOVA
+
+Really, the way to do this would be a data reduction approach - run a PCA and then compare factor scores across participants
+
+```{r}
+histogram(qualtrics.filtered$daily.lottery.since)
+histogram(qualtrics.filtered$lottery.since)
+#distributions are not normal, but MANOVA ok for the time being
+
+ml.gam.exp <- manova(cbind(lottery.since,daily.lottery.since,scratch.since,raffle.since,horses.since,bingo.since,fantasysports.since,casino.themed.app.since,online.slots.since,internet.since,casino.slots,poker.since,roulette.since,keno.since,craps.since,egm.notslots.since,sports.lottery.since,sports.pools.since,card.board.games,games.of.skills.since,sports.bet.since,stocks.since) ~ experienced + SF, data=qualtrics.filtered)
+summary(ml.gam.exp)
+
+```
+
+Histograms: Self-report measures
+
+```{r}
+par(mfrow=c(4,4))
+hist(as.numeric(qualtrics.filtered$age),breaks = 20)
+hist(qualtrics.filtered$win.est,breaks = 20)
+hist(qualtrics.filtered$pleased,breaks = 20)
+hist(qualtrics.filtered$continue.play,breaks = 20)
+hist(qualtrics.filtered$game.enjoyable,breaks = 20)
+hist(qualtrics.filtered$pgsi,breaks = 20)
+hist(qualtrics.filtered$cgpi.total.since,breaks = 20)
+hist(qualtrics.filtered$cgpi.online.since,breaks = 20)
+hist(qualtrics.filtered$positive,breaks = 20)
+hist(qualtrics.filtered$negative,breaks = 20)
+hist(qualtrics.filtered$avg_immersion,breaks = 20)
+hist(qualtrics.filtered$flow,breaks = 20)
+hist(qualtrics.filtered$dass.stress,breaks = 20)
+hist(qualtrics.filtered$dass.anxiety,breaks = 20)
+hist(qualtrics.filtered$dass.depression,breaks = 20)
+hist(qualtrics.filtered$ASRS,breaks = 20)
+
+histogram(sqrt(qualtrics.filtered$win.est))
+```
+
+Transform and center variables
+DVs to be transformed: PANAS (neg), win estimates
+
+Regressors to be centered: ASRS, DASS, PGSI
+
+```{r}
+qualtrics.filtered$gender <- as.factor(qualtrics.filtered$gender)
+
+# Demean
+qualtrics.filtered$pgsi.demeaned <- scale(qualtrics.filtered$pgsi, scale=FALSE)
+qualtrics.filtered$dass.depression.demeaned<- scale(qualtrics.filtered$dass.depression, scale=FALSE)
+qualtrics.filtered$dass.anxiety.demeaned<- scale(qualtrics.filtered$dass.anxiety, scale=FALSE)
+qualtrics.filtered$dass.stress.demeaned<- scale(qualtrics.filtered$dass.stress, scale=FALSE)
+qualtrics.filtered$ASRS.demeaned <- scale(qualtrics.filtered$ASRS, scale=FALSE)
+
+```
+
+Combine Cleo data with Qualtrics. Add Qualtrics variables to Cleo data: gender, ASRS, DASS (depression), PGSI, CPGI.
+Re-scale variables.
+
+```{r}
+# Cleo df scale credits
+cleo.df$starting_credits_scaled <- scale(cleo.df$starting_credits)
+
+# Variables indicating how much the participant is currently winning or losing (with respect to 4000 in starting credits)
+cleo.df$current_winloss <- (cleo.df$starting_credits-4000)/100
+cleo.df$current_winloss_scaled <- scale(cleo.df$starting_credits-4000)
+
+# Filter & combine Cleo data with Qualtrics
+cleo.df.filtered <- cleo.df %>% 
+  filter(id %in% qualtrics.filtered$id)
+
+qualtrics.qs <- qualtrics.filtered %>% 
+  dplyr::select(id,gender,pgsi.demeaned,cgpi.total.since,cgpi.online.since,ASRS.demeaned,dass.depression.demeaned,dass.stress.demeaned,dass.anxiety.demeaned,pgsi,experienced)
+
+cleo.df.qualtrics <- inner_join(cleo.df.filtered, qualtrics.qs, by="id") #combine with Cleo data
+
+#create a variable for bet changes
+cleo.df.qualtrics$bet_changes <- c(0,diff(cleo.df.qualtrics$bet_per_line))
+cleo.df.qualtrics$bet_changes <- ifelse(cleo.df.qualtrics$spin==1, 0, cleo.df.qualtrics$bet_changes)
+cleo.df.qualtrics$bet_changes <- ifelse(cleo.df.qualtrics$bet_changes!=0, 1, 0)
+
+#create a variable for bet change up or down
+cleo.df.qualtrics$bet_diff <- c(0,diff(cleo.df.qualtrics$bet_per_line))
+cleo.df.qualtrics$bet_up_down <- ifelse(cleo.df.qualtrics$bet_diff <0,-1,ifelse(cleo.df.qualtrics$bet_diff==0,0,1))
+
+#define previous win-loss variables
+cleo.df.qualtrics$pr_win_loss <- c(0,(cleo.df.qualtrics$win_loss[-1]))
+cleo.df.qualtrics$pr_win_loss_scaled <- scale(cleo.df.qualtrics$pr_win_loss)
+cleo.df.qualtrics$pr_winorloss <- ifelse(cleo.df.qualtrics$pr_win_loss <0,"loss","win")
+cleo.df.qualtrics$pr_loss <- ifelse(cleo.df.qualtrics$pr_win_loss <0,1,0)
+cleo.df.qualtrics$pr_win <- ifelse(cleo.df.qualtrics$pr_win_loss <0,0,1)
+
+#define sequences of wins or losses
+
+sq <- seq(1,109800,200)
+continual <- data.frame(continual=0)
+
+for (i in sq) {
+ a <- rle(cleo.df.qualtrics$pr_win[i:(i+199)])
+  b <- sequence(a$lengths)
+  b <- data.frame(b)
+  names(b)=names(continual)
+  continual=rbind(continual,b)
+}
+
+continual <- continual[-1,]
+continual <- as.data.frame(continual)
+
+continual$continualwin <- ifelse(cleo.df.qualtrics$pr_win==0,0,continual$continual)
+continual$continualloss <- ifelse(cleo.df.qualtrics$pr_loss==0,0,continual$continual)
+cleo.df.qualtrics$continualwin <- continual$continualwin
+cleo.df.qualtrics$continualloss <- continual$continualloss
+
+#Identify PGs and NPGs
+
+cleo.df.qualtrics$PG <- ifelse(cleo.df.qualtrics$pgsi<8,"NPG","PG")
+
+```
+
+Create Qualtrics and Cleo subsets based on gambling experience
+
+```{r}
+
+qualtrics.expgamblers <- qualtrics.filtered %>% 
+  filter(cgpi.online.since>0)
+
+qualtrics.novices <- qualtrics.filtered %>% 
+  filter(cgpi.online.since==0)
+
+cleo.df.qualtrics.exp <- cleo.df.qualtrics %>% 
+  filter(experienced=="AG")
+
+cleo.df.qualtrics.nov <- cleo.df.qualtrics %>% 
+  filter(experienced=="NG")
+
+```
+
+Histograms: Cleo
+
+```{r}
+par(mfrow=c(1,2))
+hist(cleo.df.qualtrics$bet_per_line)
+hist(cleo.df.qualtrics$spin_init_latency,breaks = 2000,xlim = c(0,70))
+
+#remove outliers from spin initiation latencies; use gamma distribution to analyze
+mean.sil <- mean(cleo.df.qualtrics$spin_init_latency)
+three.sd.sil <- sd(cleo.df.qualtrics$spin_init_latency)*3
+upper.sil <- mean.sil+three.sd.sil
+cleo.df.qualtrics<-replace_with_na_at(data = cleo.df.qualtrics,.vars = "spin_init_latency",condition = ~.x > upper.sil)
+cleo.df.qualtrics<-replace_with_na_at(data = cleo.df.qualtrics,.vars = "spin_init_latency",condition = ~.x ==0)
+
+mean.silX <- mean(cleo.df.qualtrics.exp$spin_init_latency)
+three.sd.silX <- sd(cleo.df.qualtrics.exp$spin_init_latency)*3
+upper.silX <- mean.silX+three.sd.silX
+cleo.df.qualtrics.exp<-replace_with_na_at(data = cleo.df.qualtrics.exp,.vars = "spin_init_latency",condition = ~.x > upper.silX)
+cleo.df.qualtrics.exp<-replace_with_na_at(data = cleo.df.qualtrics.exp,.vars = "spin_init_latency",condition = ~.x==0)
+
+```
+
+Cleo data model: bet changes up or down.
+Multinomial logistic regression.
+
+```{r}
+
+
+```
+
+Overdispersion function for Poisson models
+
+```{r}
+overdisp_fun <- function(model) {
+    rdf <- df.residual(model)
+    rp <- residuals(model,type="pearson")
+    Pearson.chisq <- sum(rp^2)
+    prat <- Pearson.chisq/rdf
+    pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+    c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+
+```
+
+Cleo data: examine slopes of bet sizes by starting credits across participants
+
+```{}
+betsize.by.credits <- cleo.df.qualtrics %>% 
+  group_by(id,SF) %>% 
+  summarize(slope=cor(bet_per_line, starting_credits_scaled, method = "spearman"))
+
+betsize.by.credits$betchange <- ifelse(is.na(betsize.by.credits$slope),"constant","change")
+
+hist(betsize.by.credits$slope)
+
+# Chi square on bet changing
+table(betsize.by.credits$SF, betsize.by.credits$betchange)
+chi <- chisq.test(table(betsize.by.credits$SF, betsize.by.credits$betchange))
+chi #not significant
+
+betchangers <- betsize.by.credits %>% 
+  filter(betchange=="change") %>% 
+  dplyr::select(id)
+
+betchangers<- as.integer(betchangers)
+
+#betsize.by.credits.noNA <- betsize.by.credits[is.na(betsize.by.credits)]<-0
+
+#hist(betsize.by.credits$slope)
+#hist(betsize.by.credits.noNA$slope)
+
+cleo.df.qualtrics.betchangers <- cleo.df.qualtrics %>% 
+  filter(id %in% betchangers$id)
+
+
+#cleo.df.qualtrics %>% 
+#  filter(id=="103328") %>% 
+#  plot(bet_per_line, starting_credits_scaled)
+
+#plot(cleo.df.qualtrics$bet_per_line, cleo.df.qualtrics$starting_credits_scaled)
+```
+
+# Cleo data model: bet sizes - random slopes model.
+
+```{r}
+ml = glmer(bet_per_line ~ SF*starting_credits*experienced + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id) + (0+starting_credits_scaled|id), data=cleo.df.qualtrics,family = "poisson")
+summary(ml)
+
+overdisp_fun(ml)
+
+p.1 <- plot_model(ml,type="pred", terms=c("starting_credits","SF","experienced"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Current $")+ylab("Bet size")+my_theme
+p.1
+
+p.2 <- plot_model(ml,type="pred", terms="dass.depression.demeaned", pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("DASS Depression")+ylab("Bet size")+my_theme
+p.2
+
+p.3 <- plot_model(ml,type="pred", terms="ASRS.demeaned",pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("ASRS")+ylab("Bet size")+my_theme
+p.3
+
+p.4 <- plot_model(ml,type="pred", terms="gender",pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Gender")+ylab("Bet size")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+p.4
+
+```
+
+## Negative binomial: Celo data model: bet sizes
+Results are largely the same as Poisson
+
+```{r}
+
+ml.nb = glmer.nb(bet_per_line ~ SF*starting_credits_scaled*experienced + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id)+(0+starting_credits_scaled|id), data=cleo.df.qualtrics)
+summary(ml.nb)
+
+p.2 <- plot_model(ml.nb,type="pred", terms=c("starting_credits","SF","experienced"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Current $")+ylab("Bet size")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+p.2
+
+p.5 <- plot_model(ml.nb,type="pred", terms=c("ASRS.demeaned"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("ADHD Symptoms (ASRS)")+ylab("Bet size")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+p.5
+
+p.6 <- plot_model(ml.nb,type="pred", terms=c("dass.depression.demeaned"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Depression Symptoms (DASS)")+ylab("Bet size")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+p.6
+
+ggsave(filename="Bet size graph.jpeg", plot=p.2, width = 7, height = 4.5 )
+ggsave(filename="Bet size graph ADHD.jpeg", plot=p.5, width = 7, height = 4.5 )
+ggsave(filename="Bet size graph DASS.jpeg", plot=p.5, width = 7, height = 4.5 )
+```
+
+## Cleo data models: spin initiation latencies
+
+Should we run a verison of this analysis excluding all the trials on which a bet change occurred?
+
+```{r}
+histogram(cleo.df.qualtrics$spin_init_latency)
+# log transform the data
+cleo.df.qualtrics$log_spin_init_latency <- log(cleo.df.qualtrics$spin_init_latency)
+histogram(cleo.df.qualtrics$log_spin_init_latency)
+
+ml.prp = lmer(log_spin_init_latency ~ pr_win_loss*SF*experienced + sequence + bet_changes + ASRS.demeaned + dass.depression.demeaned + gender+(0+pr_win_loss|id)+(1|id), data=cleo.df.qualtrics) 
+summary(ml.prp)
+
+p.prp <- plot_model(ml.prp,type="pred", terms=c("pr_win_loss","SF","experienced"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Prior outcome")+ylab("Ln(spin initiation latency)")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+p.prp
+ggsave(filename="PRP.tiff", plot=p, width = 7, height = 4.5 )
+
+#subset df to only include trials with no bet change
+cleo.df.qualtrics$prev_bet_change<-c(0,cleo.df.qualtrics$bet_changes[1:109799])
+cleo.df.qualtrics.nobetchanges<- cleo.df.qualtrics %>% 
+  filter(prev_bet_change==0)
+
+cleo.df.qualtrics.nobetchanges$pr_win_loss_scaled <- scale(cleo.df.qualtrics.nobetchanges$pr_win_loss)
+
+ml.prp.nbc = lmer(log_spin_init_latency ~ pr_win_loss_scaled*SF*experienced + sequence + ASRS.demeaned + dass.depression.demeaned + gender+(0+pr_win_loss|id)+(1|id), data=cleo.df.qualtrics.nobetchanges) 
+summary(ml.prp.nbc)
+
+p.prp.box <- cleo.df.qualtrics.nobetchanges %>% 
+  ggplot(aes(x=SF, y=log_spin_init_latency)) +
+  geom_boxplot(alpha=0.6) +
+  xlab("") +
+  scale_x_discrete(labels=(c("SF-","SF+")))+
+  my_theme + ylab("Ln(spin initiation latency)") 
+p.prp.box
+
+p.prp.nbc1 <- plot_model(ml.prp.nbc,type="pred", terms=c("pr_win_loss","SF"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Prior outcome")+ylab("Ln(spin initiation latency)")+my_theme
+p.prp.nbc1
+#ggsave(filename="PRP.tiff", plot=p, width = 7, height = 4.5 )
+
+
+p.prp.nbc2 <- plot_model(ml.prp.nbc,type="pred", terms=c("pr_win_loss","experienced"),pred.type="fe", grid = FALSE, colors = c("blue","black"))+xlab("Prior outcome")+ylab("Ln(spin initiation latency)")+my_theme
+p.prp.nbc2
+#ggsave(filename="PRP.tiff", plot=p, width = 7, height = 4.5 )
+
+
+#post hoc tests
+ml.prp.nbc.plus = lmer(log_spin_init_latency ~ pr_win_loss_scaled+(0+pr_win_loss_scaled|id)+(1|id),data=filter(cleo.df.qualtrics.nobetchanges,SF=="plus")) 
+summary(ml.prp.nbc.plus) #post-reinforcement pauses only evident in the presence of SF
+
+ml.prp.nbc.minus = lmer(log_spin_init_latency ~ pr_win_loss_scaled+(0+pr_win_loss|id)+(1|id),data=filter(cleo.df.qualtrics.nobetchanges,SF=="minus")) 
+summary(ml.prp.nbc.minus)
+
+ml.prp.nbc.AG = lmer(log_spin_init_latency ~ pr_win_loss_scaled+(0+pr_win_loss|id)+(1|id),data=filter(cleo.df.qualtrics.nobetchanges,experienced=="AG")) 
+summary(ml.prp.nbc.AG) #post-reinforcement pauses only evident in the presence of SF
+
+ml.prp.nbc.NG = lmer(log_spin_init_latency ~ pr_win_loss_scaled+(0+pr_win_loss|id)+(1|id),data=filter(cleo.df.qualtrics.nobetchanges,experienced=="NG")) 
+summary(ml.prp.nbc.NG)
+
+```
+
+Identify PGs and NPGs in Qualtrics
+
+```{r}
+qualtrics.filtered$PG <- ifelse(qualtrics.filtered$pgsi>8,"PG","NPG")
+
+table(qualtrics.filtered$PG,qualtrics.filtered$SF)
+
+```
+
+Mean bet size analysis
+Nothing much there
+
+```{r}
+qualtrics.filtered$log_mean_bet_size <- log(qualtrics.filtered$mean_bet_size)
+hist(qualtrics.filtered$mean_bet_size)
+hist(qualtrics.filtered$log_mean_bet_size)
+#log transormation doesn't help much, will need to do the gamma model
+
+ml <- glm(log_mean_bet_size ~ SF*seq*experienced + ASRS.demeaned + dass.depression.demeaned, data=qualtrics.filtered) 
+summary(ml)
+
+ml <- glm(mean_bet_size ~ experienced, data=qualtrics.filtered) #nothing
+summary(ml)
+
+plot_model(ml,type="pred", terms=c("mean_bet_size","experienced"),pred.type="fe", grid = FALSE,panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+
+
+
+
+```
+Game outcome analysis
+1. Experienced win more
+2. Betting less is associated with better outcome
+3. Sequence I is better
+4. Total bet changes are highly predictive of outcome.
+
+```{r}
+ml <- glm(outcome ~ experienced+mean_bet_size+SF+seq+total_bet_changes, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml,type="pred", terms=c("total_bet_changes"),pred.type="fe", show.data = TRUE, grid = FALSE, colors=c("black","orangered"))+xlab("Total bet changes")+ylab("Outcome")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
+
+```
+
+
+## Qualtrics data immersion model
+The higher the ADHD scores, the more immersed; the more depressed, the more immersed
+
+```{r}
+qualtrics.filtered$netoutcome <- qualtrics.filtered$outcome-4000
+ml <- glm(avg_immersion ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned) + gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot(ml) #regression diagnostics
+
+ <- plot_model(ml ,type="pred", terms="dass.depression.demeaned", pred.type="fe", show.data = TRUE, xlab("Average Immersion")+ylab("DASS Depression")+theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank()))
+plot_model(ml ,type="pred", terms="ASRS.demeaned", pred.type="fe", grid = FALSE)
+plot_model(ml ,type="pred", terms="gender", pred.type="fe", grid = FALSE)
+
+p.3 <- ggplot(qualtrics.filtered,aes(x=ASRS.demeaned, y=avg_immersion))+geom_jitter()+geom_smooth(method=lm)+xlab("ADHD Symptoms (ASRS)")+ylab("Average Immersion") + my_theme
+p.3
+
+p.4 <- ggplot(qualtrics.filtered,aes(x=dass.depression.demeaned, y=avg_immersion))+geom_jitter()+geom_smooth(method=lm)+xlab("Depression Symptoms (DASS)")+ylab("Average Immersion") + my_theme
+p.4
+
+ggsave(filename="ADHD immersion.jpeg", plot=p.3)
+ggsave(filename="DASS immersion.jpeg", plot=p.4)
+```
+
+## Qualtrics data flow model
+Same as for immersion: only ASRS significantly predicts flow
+
+```{r}
+ml <- glm(flow ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned) + gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms="ASRS.demeaned", pred.type="fe", grid = FALSE)
+
+p.7 <- ggplot(qualtrics.filtered,aes(x=ASRS.demeaned, y=flow))+geom_jitter()+geom_smooth(method=lm)+xlab("ADHD Symptoms (ASRS)")+ylab("Average Flow") + my_theme
+p.7
+ggsave(filename="ASRS flow.jpeg", plot=p.7)
+```
+
+Qualtrics data win estimate model
+The more depressed, the higher the estimate
+
+```{r}
+ml <- glm(win.est ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned) + gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms="dass.depression.demeaned",pred.type="fe", grid = FALSE)
+
+p.8 <- ggplot(qualtrics.filtered,aes(x=dass.depression.demeaned, y=win.est))+geom_jitter()+geom_smooth(method=lm)+xlab("Depression Symptoms (DASS)")+ylab("Estimated Win Frequency") + my_theme
+p.8
+ggsave(filename="DASS win est.jpeg", plot=p.8)
+
+histogram(qualtrics.filtered$win.est)
+
+```
+
+Qualtrics data pleased with the outcome of the game model
+The more they won, the more pleased they are
+
+```{r}
+ml <- glm(pleased ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned)+gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms=c("outcome","experienced"),pred.type="fe", grid = FALSE)
+```
+
+Qualtrics data want to continue playing model
+The more they won, the more they want to continue playing
+
+```{r}
+ml <- glm(continue.play ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned)+gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot(qualtrics.expgamblers$continue.play,qualtrics.expgamblers$outcome)
+plot(qualtrics.expgamblers$outcome,qualtrics.expgamblers$continue.play)
+
+```
+
+Qualtrics data game enjoyable model
+The more they won, the more they find the game enjoyable
+
+```{r}
+ml <- glm(game.enjoyable ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned)+gender, data=qualtrics.filtered) 
+summary(ml)
+```
+
+Qualtrics data positive affect model
+ADHD (positively) predicts posititive affect
+
+```{r}
+
+ml <- glm(positive ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned)+gender, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms=c("ASRS.demeaned"),pred.type="fe", grid = FALSE)
+
+```
+
+Qualtrics data negative affect model
+Depression and ASRS predicts negative affect
+Trend level interaction of SF with outcome: in SF plus condition, greater grains are associated with more positive affect
+
+```{r}
+ml <- glm(negative+1 ~ SF*outcome*experienced + as.numeric(ASRS.demeaned) + as.numeric(dass.depression.demeaned)+gender, data=qualtrics.filtered,family = Gamma) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms=c("dass.depression.demeaned"),pred.type="fe", grid = FALSE)
+plot_model(ml ,type="pred", terms=c("ASRS.demeaned"),pred.type="fe", grid = FALSE)
+```
+Does SF predict outcome? No
+
+```{r}
+hist(qualtrics.filtered$outcome)
+
+table(qualtrics.filtered$experienced,qualtrics.filtered$seq)
+
+chisq.test(table(qualtrics.filtered$experienced,qualtrics.filtered$seq)) 
+
+ml <- glm(outcome ~ SF+ experienced + seq, data=qualtrics.filtered) 
+summary(ml)
+
+plot_model(ml ,type="pred", terms=c("experienced","seq"),pred.type="fe", grid = FALSE)
+
+```
+
+#Boxplots
+```{r}
+p.outcome <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=outcome, colour=seq, fill=seq)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(group=seq), position = position_jitterdodge(), shape=21, size=3, colour="black", alpha=0.5)+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  #scale_colour_manual(values=c("red", "blue")) +
+  #scale_fill_manual(values=c("red", "blue")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Outcome (credits)") 
+p.outcome
+
+p.outcome <- qualtrics.filtered %>% 
+  ggplot(aes(x=total_bet_changes, y=outcome, colour=SF, fill=SF)) +
+  geom_point(size=3) +
+  geom_smooth(method=lm , color="black", fill="grey", se=TRUE) +
+  scale_colour_manual(values=c("black", "orange")) +
+  #scale_fill_manual(values=c("red", "blue")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Outcome (credits)") + xlab("Number of Bet Changes")
+p.outcome
+ggsave(filename="outcome_bet_changes.png", plot=p.outcome)
+
+
+p.immersion <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=avg_immersion, colour=SF, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + my_theme + ylab("Self-reported immersion") 
+  #theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  #theme(panel.border= element_blank()) +
+  #theme(axis.line.x = element_line(color="black", size = 0.5),
+        #axis.line.y = element_line(color="black", size = 0.5), 
+       # axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+       # axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+       # axis.title=element_text(size=16)) + ylab("Self-reported immersion") 
+p.immersion
+#ggsave(filename="immersion.tiff", plot=p.immersion)
+
+qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=flow, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=12, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=12, vjust=0.5),
+        axis.title=element_text(size=14)) + ylab("Self-reported flow") 
+
+p.win <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=win.est, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=2, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + my_theme + ylab("Estimated win frequency/200") 
+  #theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+ # theme(panel.border= element_blank()) +
+  #theme(axis.line.x = element_line(color="black", size = 0.5),
+        #axis.line.y = element_line(color="black", size = 0.5), 
+        #axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        #axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        #axis.title=element_text(size=16)) + ylab("Estimated win frequency/200") 
+p.win
+#ggsave(filename="win.tiff", plot=p.win)
+
+qualtrics.filtered %>% 
+  ggplot(aes(x=SF, y=pleased, fill=seq)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=seq,group=seq), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=12, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=12, vjust=0.5),
+        axis.title=element_text(size=14)) + ylab("Pleased with game outcome") 
+
+p.continue <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=continue.play, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Desire to continue playing") 
+p.continue
+#ggsave(filename="continue.tiff", plot=p.continue)
+
+p.enjoyment <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=game.enjoyable, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Finding game enjoyable") 
+p.enjoyment
+#ggsave(filename="enjoyment.tiff", plot=p.enjoyment)
+
+p.p_affect <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=positive, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=2, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("PANAS: Positive affect") 
+p.p_affect
+ggsave(filename="p_affect.png", plot=p.p_affect)
+
+p.n_affect <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=negative, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF),position = position_jitterdodge(), shape=21, size=2, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("PANAS: Negative affect") 
+p.n_affect
+ggsave(filename="n_affect.tiff", plot=p.n_affect)
+```
+
+
+# Demographics
+
+```{r}
+#Summary: gender, employment, country, income, ethnicity
+
+unique(qualtrics.filtered$country)
+
+qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
+                                                ifelse(qualtrics.filtered$country=="Italy"|qualtrics.filtered$country=="Italia"|qualtrics.filtered$country=="italy","Italy",
+                                                       ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
+                                                              ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil",
+                                                                     ifelse(qualtrics.filtered$country=="London","UK",
+                                                                            ifelse(qualtrics.filtered$country=="Estonia","Estonia",
+                                                                                   ifelse(qualtrics.filtered$country=="Spain","Spain","Germany")))))))
+
+qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
+                                                       ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
+                                                    ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil","Other")))
+
+#Country
+country.summary <- qualtrics.filtered %>% 
+  group_by(country.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+p <- ggplot(country.summary, aes(x="", y=percent, fill = country.recoded)) +
+  geom_bar(stat = "identity",width=1,color="white") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
+  theme_void()+
+  scale_fill_brewer(palette="Set2")
+p
+
+ggsave(filename="cleo_countries.tiff", plot=p, width = 10, height = 4.5 )
+
+gender.summary <- qualtrics.filtered %>% 
+  group_by(gender,experienced,SF) %>% 
+  summarise(n=n())
+
+write.csv(gender.summary,"gender.summary.csv")
+
+
+qualtrics.filtered$age <- as.numeric(qualtrics.filtered$age)
+qualtrics.filtered$age<-na_if(qualtrics.filtered$age,3)
+hist(qualtrics.filtered$age)
+
+t.test(qualtrics.filtered$age~qualtrics.filtered$SF)
+
+
+
+age.summary <- qualtrics.filtered %>% 
+  group_by(experienced,SF) %>% 
+  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
+
+age.summary <- qualtrics.filtered %>% 
+  group_by(experienced) %>% 
+  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
+
+qualtrics.filtered$ethnicity.recoded <- ifelse(qualtrics.filtered$ethnicity==1,"White",
+                                                   ifelse(qualtrics.filtered$ethnicity==2, "Black or African American",
+                                                          ifelse(qualtrics.filtered$ethnicity==3,"American Indian or Alaska Native",
+                                                                 ifelse(qualtrics.filtered$ethnicity==4,"Asian",
+                                                                        ifelse(qualtrics.filtered$ethnicity==5,"Native Hawaiian or Pacific Islander",
+                                                                               ifelse(qualtrics.filtered$ethnicity==6,"Hispanic/Latino(a)",
+                                                                                      ifelse(qualtrics.filtered$ethnicity==7,"Other","Multiracial")))))))
+ethnicity.summary <- qualtrics.filtered %>% 
+  group_by(ethnicity.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+qualtrics.filtered$employment.recoded <- ifelse(qualtrics.filtered$employment==1,"working, paid employee",
+                                                   ifelse(qualtrics.filtered$employment==2, "working, self-employed",
+                                                          ifelse(qualtrics.filtered$employment==3,"temporary layoff",
+                                                                 ifelse(qualtrics.filtered$employment==4,"looking for work",
+                                                                        ifelse(qualtrics.filtered$employment==5,"not working, retired",
+                                                                               ifelse(qualtrics.filtered$employment==6,"not working, disabled",
+                                                                                      ifelse(qualtrics.filtered$employment==7,"not working, other","prefer not to answer")))))))
+
+#Employment
+employment.summary <- qualtrics.filtered %>% 
+  group_by(employment.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+p.e <- ggplot(employment.summary, aes(x="", y=percent, fill = employment.recoded)) +
+  geom_bar(stat = "identity",width=1,color="black") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
+  theme_void()+
+  scale_fill_brewer(palette="Set2")
+p.e
+
+ggsave(filename="cleo_employment.tiff", plot=p.e, width = 10, height = 4.5 )
+
+qualtrics.filtered$income.recoded <- ifelse(qualtrics.filtered$income==1,"< 10K",
+                                               ifelse(qualtrics.filtered$income==2,"10K-19K",
+                                                      ifelse(qualtrics.filtered$income==3,"20K-29K",
+                                                             ifelse(qualtrics.filtered$income==4,"30K-39K",
+                                                                    ifelse(qualtrics.filtered$income==5,"40K-49K",
+                                                                           ifelse(qualtrics.filtered$income==6,"50K-59K",
+                                                                                  ifelse(qualtrics.filtered$income==7,"60K-69K",
+                                                                                         ifelse(qualtrics.filtered$income==8,"70K-79K",
+                                                                                                ifelse(qualtrics.filtered$income==9,"80K-89K",
+                                                                                                       ifelse(qualtrics.filtered$income==10,"90K-99K",
+                                                                                                              ifelse(qualtrics.filtered$income==11,"100K-149K",">=150K")))))))))))
+
+qualtrics.filtered$groupedincome.recoded <- ifelse(qualtrics.filtered$income==1 | qualtrics.filtered$income==2 | qualtrics.filtered$income==3 |qualtrics.filtered$income==4 |qualtrics.filtered$income==5 ,"< 10K-49K",                                   ifelse(qualtrics.filtered$income==6|qualtrics.filtered$income==7|qualtrics.filtered$income==8|qualtrics.filtered$income==9|qualtrics.filtered$income==10,"50K-99K",">=100K"))
+
+income.summary <- qualtrics.filtered %>% 
+  group_by(groupedincome.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+rearrange <- c(1,12,11,2,3,4,5,6,7,8,9,10)
+income.summary$rearrange <- rearrange
+income.summary <- income.summary %>% 
+  arrange(rearrange)
+write.csv(income.summary,"income.csv")
+
+#Income
+
+p.i <- ggplot(income.summary, aes(income.recoded, x=rearrange, y=percent)) +
+  geom_bar(stat = "identity",fill="black") + theme_bw()+
+  scale_x_discrete(labels=c("1" = "<10k", "2" = "10K-19K"))+
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=12, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=12, vjust=0.5),
+        axis.title=element_text(size=14)) + xlab("Income bracket") + ylab("%") 
+p.i
+ggsave(filename="cleo_income.tiff", plot=p.i)
+
+p.g <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=cgpi.total.since, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Gambling frequency since pandemic") 
+p.g
+ggsave(filename="cleo_gambling_frequency.tiff", plot=p.g)
+
+p.go <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=cgpi.online.since, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=14)) + ylab("Online gambling frequency since pandemic") 
+p.go
+ggsave(filename="cleo_online_gambling_frequency.tiff", plot=p.go)
+
+p.pgsi <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=pgsi,fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_y_continuous(breaks=c(0,3,8,21))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=18, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=18, vjust=0.5),
+      axis.title=element_text(size=18)) + ylab("Problem gambling severity index")
+p.pgsi
+ggsave(filename="cleo_pgsi.tiff", plot=p.pgsi)
+
+```
+

@@ -17,7 +17,7 @@ library(lattice)
 library(lmerTest)
 library(emmeans)
 library(ggplot2)
-library(tidyverse)
+#library(tidyverse)
 library(dplyr)
 library(influence.ME)
 library(gmodels)#CI
@@ -182,10 +182,23 @@ Filter Qualtrics data to include those with Cleo data. Do some cleaning and ques
 
 ```{r}
 
+
 qualtrics.filtered <- df %>% 
   filter(Random.ID %in% nolongspins$id) %>%  
   filter(Q142=="" & Q141=="2") %>% #attention checks; if the data are exported form Qualtrics using text, a problem can occur at this point 
   dplyr::select(!c(cleo_data, cleo_ui))
+
+M_pgsi.page.submit.time <- mean(qualtrics.filtered$Q180_Page.Submit)
+SD_pgsi.page.submit.time <- sd(qualtrics.filtered$Q180_Page.Submit)
+M_geq.page.submit.time <- mean(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
+SD_geq.page.submit.time <- sd(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
+M_panas.page.submit.time <- mean(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
+SD_panas.page.submit.time <- sd(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
+M_dass.page.submit.time <- mean(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
+SD_dass.page.submit.time <- sd(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
+M_asrs.page.submit.time <- mean(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
+SD_asrs.page.submit.time <- sd(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
+
 
 which(!nolongspins$id %in% df$Random.ID) # IDs " 29370" " 48907" "449479" "600217" are missing from Qualtrics - probably mislabeled
 nolongspins$id[which(!nolongspins$id %in% df$Random.ID)]

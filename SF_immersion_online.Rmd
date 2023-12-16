@@ -539,7 +539,8 @@ panas.dist <- as.numeric(badScaleCheck.panas.df$panas.items.id[badScaleCheck.pan
 dass.dist <- as.numeric(badScaleCheck.dass.df$dass.items.id[badScaleCheck.dass.df$X.as.numeric.badScaleCheck..>0])
 asrs.dist <- as.numeric(badScaleCheck.asrs.df$asrs.items.id[badScaleCheck.asrs.df$X.as.numeric.badScaleCheck..>0])
 pgsi.proper.dist <- as.numeric(badScaleCheck.pgsi.proper.df$cpgi.items.proper.id[badScaleCheck.pgsi.proper.df$X.as.numeric.badScaleCheck..>0])
-  
+
+```  
 ####Distribution Testing for PANAS####
 
 ```{r}
@@ -724,6 +725,8 @@ dass.badDist = as.numeric(dass.badDist)
 
 dass.dist <- as.numeric(qualtrics.filtered$id[dass.badDist>0])
 
+```
+
 ####Distribution Testing for PGSI since####
 
 ```{r}
@@ -814,8 +817,9 @@ for(i in 1:nsim){
 pgsi.since.badDist = as.numeric(pgsi.since.badDist)
 
 pgsi.since.dist <- as.numeric(qualtrics.filtered$id[pgsi.since.badDist>0])
+```
 
-###Distribution testing for pgsi.bf###
+###Distribution testing for pgsi.bf
 
 ```{r}
 pgsi.bf.items <- qualtrics.filtered %>% 
@@ -905,6 +909,8 @@ for(i in 1:nsim){
 pgsi.bf.badDist = as.numeric(pgsi.bf.badDist)
 
 pgsi.bf.dist <- as.numeric(qualtrics.filtered$id[pgsi.bf.badDist>0])
+
+```
 
 ####Distribution Testing for ASRS####
 
@@ -997,6 +1003,7 @@ asrs.badDist = as.numeric(asrs.badDist)
 
 asrs.dist <- as.numeric(qualtrics.filtered$id[asrs.badDist>0])
 
+```
 ####Distribution testing for GEQ3####
 
 ```{r}
@@ -1088,6 +1095,8 @@ geq3.badDist = as.numeric(geq3.badDist)
 
 geq3.dist <- as.numeric(qualtrics.filtered$id[geq3.badDist>0])
 
+```
+
 ###Distribution testing for GEQlast#####
 
 ```{r}
@@ -1178,7 +1187,7 @@ for(i in 1:nsim){
 geqlast.badDist = as.numeric(geqlast.badDist)
 
 geqlast.dist <- as.numeric(qualtrics.filtered$id[geqlast.badDist>0])
-
+```
 ##Distribution testing for PGSI proper##
 
 ```{r}

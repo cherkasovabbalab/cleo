@@ -23,18 +23,21 @@ library(influence.ME)
 library(gmodels)#CI
 library(corrplot)
 library(arm)
+library(car)
 library(gridExtra)
 library(sjPlot)
 library(stringr)
 library(httr)
-#library(OSF2R)
 library(osfr)
 library(naniar)
 library(QuantPsyc) #lm.beta() for standardized betas
-library(AER)
+#library(AER)
 library(mclogit)
 library(fitdistrplus)
 library(tidyr)
+library(FactoMineR)
+library(factoextra)
+library(report)
 ```
 
 Set up plotting theme
@@ -47,7 +50,7 @@ my_theme <- theme(
   #axis.title.x = element_blank(),
   axis.title.x = element_text(size=20, face="bold"),
   axis.title.y = element_text(size=20, face="bold"),
-  axis.text.x = element_text(size=18,face="bold",color="black"),
+  axis.text.x = element_text(size=10,face="bold",color="black"),
   axis.text.y = element_text(size=18,face="bold",color="black"),
   legend.title = element_blank(),
   legend.text = element_text(size=15,face="bold"),
@@ -72,7 +75,7 @@ df <- read.csv("C:/Users/lsbcherkasovalab/Documents/Celo/Cleo_January 17, 2022_1
 
 Read in cleo_data files directly from OSF doesn't work for now. Files need to be downloaded to local machine first.
 
-```{r}
+```{}
 # RPPmaster <- readOSF("https://osf.io/8nh5p/files/", read.dat, sep ="|", header = FALSE, dec =".") #this command doesn't work
 
 # the following only manages to download 10 files into the temp directory
@@ -179,17 +182,43 @@ nolongspins <- summary %>%
 
 ```
 
-Filter Qualtrics data to include those with Cleo data. Perform initial attention check. Remove cleo_data & cleo_ui - this is provisional. May need cleo ui later on to define PRPs.
+# Filter Qualtrics data to include those with Cleo data. Perform initial attention check. Remove cleo_data & cleo_ui.
 
 ```{r}
-
 qualtrics.filtered <- df %>% 
   filter(Random.ID %in% nolongspins$id) %>%  
-  filter(Q142=="" | Q141=="2") %>% #attention checks; if the data are exported form Qualtrics using text, a problem can occur at this point 
   dplyr::select(!c(cleo_data, cleo_ui))
+#  filter(Q142=="" | Q141=="2") %>% #attention checks; if the data are exported form Qualtrics using text, a problem can occur at this point
+```
+# Quality checks as per Buchanan & Scofield, 2018: Identifying participants who failed a quality check
+CPGI: Q180, 1889 characters, out of non-excluded, 144 flagged for timing, 1 flagged for clicks
+GEQ: Q181, 655 characters; out of non-excluded, 34 flagged for timing, 1 flagged for clicks
+PANAS: Q182, 331 characters; out of non-excluded, 26 flagged for timing, 2 flagged for clicks
+DASS: Q183, 1889 characters; out of non-excluded, 166 flagged for timing, 3 flagged for clicks
+ASRS: Q185, 516 characters; out of non-excluded, 183 flagged for timing, 0 flagged for clicks
+
+```{r}
+# Attention checks
+qualtrics.filtered$failedQs.1 <- ifelse(qualtrics.filtered$Q141=="2",0,1)
+qualtrics.filtered$failedQs.2 <- ifelse(qualtrics.filtered$Q142=="",0,1) 
+
+# Click count
+qualtrics.filtered$failedClick <- ifelse(qualtrics.filtered$Q181_Click.Count<11 | is.na(qualtrics.filtered$Q181_Click.Count) | qualtrics.filtered$Q182_Click.Count<10 | is.na(qualtrics.filtered$Q182_Click.Count) | qualtrics.filtered$Q183_Click.Count<21 | is.na(qualtrics.filtered$Q183_Click.Count) | qualtrics.filtered$Q185_Click.Count<5 | is.na(qualtrics.filtered$Q185_Click.Count) | qualtrics.filtered$Q180_Click.Count<21 | is.na(qualtrics.filtered$Q180_Click.Count), 1, 0)
+
+# Timing
+qualtrics.filtered$failedTiming<- ifelse(qualtrics.filtered$Q181_Page.Submit<32.13 | is.na(qualtrics.filtered$Q181_Page.Submit) | qualtrics.filtered$Q182_Page.Submit<16.24 | is.na(qualtrics.filtered$Q182_Page.Submit) | qualtrics.filtered$Q183_Page.Submit<58.28 | is.na(qualtrics.filtered$Q183_Page.Submit) | qualtrics.filtered$Q185_Page.Submit<25.31 | is.na(qualtrics.filtered$Q185_Page.Submit) | qualtrics.filtered$Q180_Page.Submit<92.67 | is.na(qualtrics.filtered$Q180_Page.Submit), 1, 0)
+
+# Total filed
+qualtrics.filtered$tot.failed.checks <- qualtrics.filtered$failedQs.1 + qualtrics.filtered$failedClick + qualtrics.filtered$failedTiming
+```
+
+# Fileter qualtrics data again based on quality checks
+
+```{r}
+qualtrics.filtered <- filter(qualtrics.filtered, tot.failed.checks < 2)
 
 ```
-Do questionnaire variable re-labeling to make it easier to operate with. Recode CPGI.
+Do questionnaire variable re-labeling to make it easier to operate with. Re-code CPGI.
 
 ```{r}
 #which(!nolongspins$id %in% df$Random.ID) # IDs " 29370" " 48907" "449479" "600217" are missing from Qualtrics - probably mislabeled
@@ -286,7 +315,7 @@ qualtrics.filtered <- inner_join(qualtrics.filtered, nolongspins.filt, by="id")
 qualtrics.filtered[65:76][is.na(qualtrics.filtered[65:76])] <- 0
 
 
-#PGSI: Q72 - Q80; for PGSI, we are subtracting 1 from the score rather than recoding
+#PGSI: Q72 - Q80; for PGSI, we are subtracting 1 from the score rather than re-coding
 qualtrics.filtered$pgsi <- as.numeric(qualtrics.filtered$Q72)-1+as.numeric(qualtrics.filtered$Q73)-1+as.numeric(qualtrics.filtered$Q74)-1+as.numeric(qualtrics.filtered$Q75)-1+as.numeric(qualtrics.filtered$Q76)-1+as.numeric(qualtrics.filtered$Q77)-1+as.numeric(qualtrics.filtered$Q78)-1+as.numeric(qualtrics.filtered$Q79)-1+as.numeric(qualtrics.filtered$Q80)-1
 
 #CPGI
@@ -311,27 +340,31 @@ qualtrics.filtered<-qualtrics.filtered %>%
   mutate(dass.anxiety = Q105-1+Q107-1+Q112-1+Q114-1+Q120-1+Q124-1+Q125-1) %>% 
   mutate(dass.depression = Q106-1+Q108-1+Q115-1+Q118-1+Q121-1+Q122-1+Q126-1)
 
-#ASRS
+#ASRS:we are just subtracting 1 rather than re-coding everything
 qualtrics.filtered<-qualtrics.filtered %>% 
   mutate(ASRS = as.numeric(Q128)-1+as.numeric(Q130)-1+as.numeric(Q131)-1+as.numeric(Q132)-1+as.numeric(Q133)-1)
 
 ```
 
-Quality checks as per Buchanan
-
+# Additional quality checks as per Buchanan & Scofield, 2018 - not used
+### number of scale options used CPGI since
 ```{r}
 ####number of scale options used CPGI since####
 cpgi.items.since <- qualtrics.filtered %>% 
-  dplyr::select(id,lottery.since,daily.lottery.since,scratch.since,raffle.since,horses.since,bingo.since,fantasysports.since,casino.themed.app.since,online.slots.since,internet.since)
+  dplyr::select(lottery.since,daily.lottery.since,scratch.since,raffle.since,horses.since,bingo.since,fantasysports.since,casino.themed.app.since,online.slots.since,internet.since)
 
 cpgi.since.min=0
 cpgi.since.max=7
+optionhalf = length(cpgi.since.min:cpgi.since.max)/2+1
 
 OptUse = function(x){
   length(table(as.vector(as.matrix(unname(x)))))
 }
 numOpt = apply(cpgi.items.since,1,OptUse)
-numOpt = as.numeric(numOpt)
+numOpt <- as.data.frame(numOpt)
+numOpt.cpgi.id <- cbind(qualtrics.filtered$id, numOpt)
+
+numOpt = numOpt[,1]
 nsim = length(numOpt)
 badScaleCheck = rep(NA, length(numOpt))
 for(i in 1:nsim){
@@ -341,80 +374,223 @@ for(i in 1:nsim){
     badScaleCheck[i] = 1
   } else { badScaleCheck[i] = 0 }
 }
-badScaleCheck.PGSI.since.df = data.frame(cpgi.items.since$id,(as.numeric(badScaleCheck)))
+badScaleCheck
 
-####number of scale options used CPGI bf####
-cpgi.items.bf <- qualtrics.filtered %>% 
-  dplyr::select(id,lottery.bf,daily.lottery.fb,scratch.bf,raffle.bf,horses.bf,bingo.bf,fantasysports.bf,casino.themed.app.bf,online.slots.bf,internet.bf)
+qualtrics.filtered$badScaleCheck.cpgi <- badScaleCheck
 
-cpgi.bf.min=1
-cpgi.bf.max=3
+```
+### distribution testing for CPGI
 
-OptUse = function(x){
-  length(table(as.vector(as.matrix(unname(x)))))
-}
-numOpt = apply(cpgi.items.bf,1,OptUse)
-numOpt = as.numeric(numOpt)
-nsim = length(numOpt)
-badScaleCheck = rep(NA, length(numOpt))
+```{r}
+cpgi.since.items <- qualtrics.filtered %>% 
+  dplyr::select(id,lottery.since,daily.lottery.since,scratch.since,raffle.since,horses.since,bingo.since,fantasysports.since,casino.themed.app.since,online.slots.since,internet.since) %>% 
+  mutate_at(vars(-id), ~ . + 1) #this is to deal with participants who select 0 for everything
+
+
+na.cpgi <- apply(is.na(cpgi.since.items), 2, which) #identify row indices of NA items in each column to exclude
+cpgi.items <- drop_na(cpgi.since.items) #drop any rows
+
+cpgi.min=1
+cpgi.max=8
+
+uniform = rep(NA,nrow(cpgi.items))
+normal = rep(NA, nrow(cpgi.items))
+dist = rep(NA, nrow(cpgi.items))
+nsim = nrow(cpgi.items)
 for(i in 1:nsim){
-  ##more than half of the options
-  optionhalf = length(cpgi.bf.min:cpgi.bf.max)/2+1
-  if(numOpt[i] >= optionhalf){
-    badScaleCheck[i] = 1
-  } else { badScaleCheck[i] = 0 }
+  temprow = as.numeric(unname(cpgi.items[i,2:11])) 
+  utable = matrix(0, nrow = 1, ncol = length(cpgi.min:cpgi.max))
+  for(x in cpgi.min:cpgi.max){
+  utable[x] = length(temprow[ temprow == x])
+  }
+  uniformest = chisq.test(utable,
+                          rescale.p = T,
+                          simulate.p.value = T)
+    ##test normal distribution
+    ##first convert to z score
+  ztest = scale(temprow)
+    ##then figure out how much of the data is binned for SDs
+  ztable = matrix(0, nrow = 1, ncol = 6)
+  ztable[1] = length(ztest[ ztest <= -2 ])  
+  ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
+  ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
+  ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
+  ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
+  ztable[6] = length(ztest[ ztest > 2 ])
+  znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
+  normalest = chisq.test(ztable,
+                         p = znormal*sum(ztable),
+                         rescale.p = T,
+                         simulate.p.value = T)
+    ##output return chi square values
+  uniform[i] = uniformest$statistic
+  normal[i] = normalest$statistic
+  ##if uniform < normal
+  if(uniformest$statistic < normalest$statistic)
+  {
+      ##if more than 1 option
+    if (numOpt[i]>1)
+    {
+      dist[i] = 0 ##uniform is better
+    } else { ##handles when people only pick one thing
+      dist[i] = 2
+    }
+  }
+    ##if uniform >= normal
+    if(uniformest$statistic >= normalest$statistic)
+  {
+      ##if more than 1 option
+    if (numOpt[i]>1)
+    {
+      dist[i] = 1 ##normal is better
+    } else { ##handles when people only pick one thing
+      dist[i] = 2
+    }
+  }
+  #0 means uniform fits better
+  #1 means normal fits better
+  #2 means only chose one scale option
+}## end of for loop
+
+####distribution coding####
+cpgi.since.badDist = rep(NA, nsim)
+for(i in 1:nsim){
+  if(dist[i] == 0){
+    cpgi.since.badDist[i] = 1
+  } 
+  if (dist[i] == 1){
+    cpgi.since.badDist[i] = 0
+  } 
+  if (dist[i] == 2) {
+    cpgi.since.badDist[i] = 0
+  }
 }
-badScaleCheck.pgsi.bf.df = data.frame(cpgi.items.bf$id,(as.numeric(badScaleCheck)))
+cpgi.since.badDist = as.numeric(cpgi.since.badDist)
+cpgi.since.badDist
+qualtrics.filtered$badDist.cpgi <- cpgi.since.badDist
 
-##number of scale options used PGSI 
+```
 
-####number of scale options used CPGI proper####
-cpgi.items.proper <- qualtrics.filtered %>% 
+### number of scale options used PGSI
+```{r}
+pgsi.items.proper <- qualtrics.filtered %>% 
   dplyr::select(id,Q72,Q73,Q74,Q75,Q76,Q77,Q78,Q79,Q80)
 
-cpgi.proper.min=1
-cpgi.proper.max=4
+pgsi.proper.min=1
+pgsi.proper.max=4
 
 OptUse = function(x){
   length(table(as.vector(as.matrix(unname(x)))))
 }
-numOpt = apply(cpgi.items.proper,1,OptUse)
+numOpt = apply(pgsi.items.proper,1,OptUse)
 numOpt = as.numeric(numOpt)
+numOpt <- as.data.frame(numOpt)
+numOpt.pgsi.id <- cbind(qualtrics.filtered$id, numOpt)
+
+numOpt = numOpt[,1]
 nsim = length(numOpt)
 badScaleCheck = rep(NA, length(numOpt))
 for(i in 1:nsim){
   ##more than half of the options
-  optionhalf = length(cpgi.proper.min:cpgi.proper.max)/2+1
+  optionhalf = length(pgsi.proper.min:pgsi.proper.max)/2+1
   if(numOpt[i] >= optionhalf){
     badScaleCheck[i] = 1
   } else { badScaleCheck[i] = 0 }
 }
-badScaleCheck.pgsi.proper.df = data.frame(cpgi.items.proper$id,(as.numeric(badScaleCheck)))
+badScaleCheck
+qualtrics.filtered$badScaleCheck.pgsi <- badScaleCheck
 
-####number of scale options used geq first 3 (7 options)####
-geq.items.first3 <- qualtrics.filtered %>% 
-  dplyr::select(id,pleased,continue.play,game.enjoyable)
+```
+### distribution testing for PGSI
 
-geq.first3.min=1
-geq.first3.max=7
+```{r}
+pgsi.items.proper <- drop_na(pgsi.items.proper)
 
-OptUse = function(x){
-  length(table(as.vector(as.matrix(unname(x)))))
-}
-numOpt = apply(geq.items.first3,1,OptUse)
-numOpt = as.numeric(numOpt)
-nsim = length(numOpt)
-badScaleCheck = rep(NA, length(numOpt))
+pgsi.proper.min=1
+pgsi.proper.max=4
+
+uniform = rep(NA,nrow(pgsi.items.proper))
+normal = rep(NA, nrow(pgsi.items.proper))
+dist = rep(NA, nrow(pgsi.items.proper))
+nsim = nrow(pgsi.items.proper)
+  for(i in 1:nsim){
+    temprow = as.numeric(unname(pgsi.items.proper[i,2:10])) 
+    utable = matrix(0, nrow = 1, ncol = length(pgsi.proper.min:pgsi.proper.max))
+    for(x in pgsi.proper.min:pgsi.proper.max) {
+      utable[x] = length(temprow[ temprow == x])
+    }
+    uniformest = chisq.test(utable,
+                            rescale.p = T,
+                            simulate.p.value = T)
+    ##test normal distribution
+    ##first convert to z score
+    ztest = scale(temprow)
+    ##then figure out how much of the data is binned for SDs
+    ztable = matrix(0, nrow = 1, ncol = 6)
+    ztable[1] = length(ztest[ ztest <= -2 ])  
+    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
+    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
+    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
+    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
+    ztable[6] = length(ztest[ ztest > 2 ])
+    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
+    normalest = chisq.test(ztable,
+                           p = znormal*sum(ztable),
+                           rescale.p = T,
+                           simulate.p.value = T)
+    ##output return chi square values
+    uniform[i] = uniformest$statistic
+    normal[i] = normalest$statistic
+    ##if uniform < normal
+    if(uniformest$statistic < normalest$statistic)
+    {
+      ##if more than 1 option
+      if (numOpt[i]>1)
+      {
+        dist[i] = 0 ##uniform is better
+      } else { ##handles when people only pick one thing
+        dist[i] = 2
+      }
+    }
+    ##if uniform >= normal
+    if(uniformest$statistic >= normalest$statistic)
+    {
+      ##if more than 1 option
+      if (numOpt[i]>1)
+      {
+        dist[i] = 1 ##normal is better
+      } else { ##handles when people only pick one thing
+        dist[i] = 2
+      }
+        
+    }
+  #0 means uniform fits better
+  #1 means normal fits better
+  #2 means only chose one scale option
+}## end of for loop
+
+####distribution coding####
+pgsi.proper.badDist = rep(NA, nsim)
 for(i in 1:nsim){
-  ##more than half of the options
-  optionhalf = length(geq.first3.min:geq.first3.max)/2+1
-  if(numOpt[i] >= optionhalf){
-    badScaleCheck[i] = 1
-  } else { badScaleCheck[i] = 0 }
+  if(dist[i] == 0){
+    pgsi.proper.badDist[i] = 1
+  } 
+  if (dist[i] == 1){
+    pgsi.proper.badDist[i] = 0
+  } 
+  if (dist[i] == 2) {
+    pgsi.proper.badDist[i] = 0
+  }
 }
-badScaleCheck.geq.first3.df = data.frame(geq.items.first3$id,(as.numeric(badScaleCheck)))
 
-####number of scale options used geq felt (5 options)####
+pgsi.proper.badDist = as.numeric(pgsi.proper.badDist)
+pgsi.proper.badDist
+qualtrics.filtered$badDist.pgsi <- pgsi.proper.badDist
+
+```
+
+### number of scale options used GEQ+DQ
+```{r}
 geq.items.felt <- qualtrics.filtered %>% 
   dplyr::select(id,GEQ3,DQ4,DQ5,GEQ6,DQ7,DQ8,DQ9)
 
@@ -435,9 +611,100 @@ for(i in 1:nsim){
     badScaleCheck[i] = 1
   } else { badScaleCheck[i] = 0 }
 }
-badScaleCheck.geq.felt.df = data.frame(geq.items.felt$id,(as.numeric(badScaleCheck)))
+badScaleCheck
+qualtrics.filtered$badScaleCheck.geq <- badScaleCheck
+```
 
-####number of scale options used panas ####
+### distribution testing for GEQ+DQ
+```{r}
+geq.items <- qualtrics.filtered %>% 
+  dplyr::select(id,GEQ3,DQ4,DQ5,GEQ6,DQ7,DQ8,DQ9)
+
+geq.items <- drop_na(geq.items)
+
+geq.min=1
+geq.max=5
+
+uniform = rep(NA,nrow(geq.items))
+normal = rep(NA, nrow(geq.items))
+dist = rep(NA, nrow(geq.items))
+nsim = nrow(geq.items)
+  for(i in 1:nsim){
+    temprow = as.numeric(unname(geq.items[i,2:8])) 
+    utable = matrix(0, nrow = 1, ncol = length(geq.min:geq.max))
+    for(x in geq.min:geq.max) {
+      utable[x] = length(temprow[ temprow == x])
+    }
+    uniformest = chisq.test(utable,
+                            rescale.p = T,
+                            simulate.p.value = T)
+    ##test normal distribution
+    ##first convert to z score
+    ztest = scale(temprow)
+    ##then figure out how much of the data is binned for SDs
+    ztable = matrix(0, nrow = 1, ncol = 6)
+    ztable[1] = length(ztest[ ztest <= -2 ])  
+    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
+    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
+    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
+    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
+    ztable[6] = length(ztest[ ztest > 2 ])
+    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
+    normalest = chisq.test(ztable,
+                           p = znormal*sum(ztable),
+                           rescale.p = T,
+                           simulate.p.value = T)
+    ##output return chi square values
+    uniform[i] = uniformest$statistic
+    normal[i] = normalest$statistic
+    ##if uniform < normal
+    if(uniformest$statistic < normalest$statistic)
+    {
+      ##if more than 1 option
+      if (numOpt[i]>1)
+      {
+        dist[i] = 0 ##uniform is better
+      } else { ##handles when people only pick one thing
+        dist[i] = 2
+      }
+    }
+    ##if uniform >= normal
+    if(uniformest$statistic >= normalest$statistic)
+    {
+      ##if more than 1 option
+      if (numOpt[i]>1)
+      {
+        dist[i] = 1 ##normal is better
+      } else { ##handles when people only pick one thing
+        dist[i] = 2
+      }
+        
+    }
+  #0 means uniform fits better
+  #1 means normal fits better
+  #2 means only chose one scale option
+}## end of for loop
+
+####distribution coding####
+geq.badDist = rep(NA, nsim)
+for(i in 1:nsim){
+  if(dist[i] == 0){
+    geq.badDist[i] = 1
+  } 
+  if (dist[i] == 1){
+    geq.badDist[i] = 0
+  } 
+  if (dist[i] == 2) {
+    geq.badDist[i] = 0
+  }
+}
+geq.badDist = as.numeric(geq.badDist)
+geq.badDist
+qualtrics.filtered$badDist.geq <- geq.badDist
+```
+
+### number of scale options used panas
+```{r}
 panas.items <- qualtrics.filtered %>% 
   dplyr::select(id,Q93,Q94,Q95,Q96,Q97,Q98,Q99,Q100,Q101,Q102)
 
@@ -458,97 +725,15 @@ for(i in 1:nsim){
     badScaleCheck[i] = 1
   } else { badScaleCheck[i] = 0 }
 }
-badScaleCheck.panas.df = data.frame(panas.items$id,(as.numeric(badScaleCheck)))
+badScaleCheck
+qualtrics.filtered$badScaleCheck.panas <- badScaleCheck
+```
 
-####number of scale options used dass####
-dass.items <- qualtrics.filtered %>% 
-  dplyr::select(id,Q104,Q105,Q106,Q107,Q108,Q110,Q112,Q113,Q114,Q115,Q116,Q117,Q118,Q119,Q120,Q121,Q122,Q123,Q124,Q125,Q126)
-
-dass.min=1
-dass.max=4
-
-OptUse = function(x){
-  length(table(as.vector(as.matrix(unname(x)))))
-}
-numOpt = apply(dass.items,1,OptUse)
-numOpt = as.numeric(numOpt)
-nsim = length(numOpt)
-badScaleCheck = rep(NA, length(numOpt))
-for(i in 1:nsim){
-  ##more than half of the options
-  optionhalf = length(dass.min:dass.max)/2+1
-  if(numOpt[i] >= optionhalf){
-    badScaleCheck[i] = 1
-  } else { badScaleCheck[i] = 0 }
-}
-badScaleCheck.dass.df = data.frame(dass.items$id,(as.numeric(badScaleCheck)))
-
-####number of scale options used asrs####
-asrs.items <- qualtrics.filtered %>% 
-  dplyr::select(id,Q128,Q130,Q131,Q132,Q133)
-
-asrs.min=1
-asrs.max=5
-
-OptUse = function(x){
-  length(table(as.vector(as.matrix(unname(x)))))
-}
-numOpt = apply(asrs.items,1,OptUse)
-numOpt = as.numeric(numOpt)
-nsim = length(numOpt)
-badScaleCheck = rep(NA, length(numOpt))
-for(i in 1:nsim){
-  ##more than half of the options
-  optionhalf = length(asrs.min:asrs.max)/2+1
-  if(numOpt[i] >= optionhalf){
-    badScaleCheck[i] = 1
-  } else { badScaleCheck[i] = 0 }
-}
-badScaleCheck.asrs.df = data.frame(asrs.items$id,(as.numeric(badScaleCheck)))
-
- ####response/page time####
-
-cpgi.bad.page.timing <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q180_Page.Submit<92.67])
-geq.bad.page.timing <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q181_Page.Submit<32.13])
-panas.bad.page.timing <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q182_Page.Submit<16.24])
-dass.bad.page.timing <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q183_Page.Submit<58.28])
-asrs.bad.page.timing <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q185_Page.Submit<25.31])
-
-####response/page time WPM###
-
-
-####click count####
-
-cpgi.bad.click <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q180_Click.Count<21])
-geq.bad.click <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q181_Click.Count<11])
-panas.bad.click <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q182_Click.Count<10])
-dass.bad.click <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q183_Click.Count<21])
-asrs.bad.click <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q185_Click.Count<5])
-
-###manipulation check####
-
-cpgi.bad.man <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q141!=2])
-panas.bad.man <- as.numeric(qualtrics.filtered$id[qualtrics.filtered$Q142>=1])
-
-###scale options used###
-
-pgsi.since.dist <- as.numeric(badScaleCheck.PGSI.since.df$cpgi.items.since.id[badScaleCheck.PGSI.since.df$X.as.numeric.badScaleCheck..>0])
-pgsi.bf.dist <- as.numeric(badScaleCheck.pgsi.bf.df$cpgi.items.bf.id[badScaleCheck.pgsi.bf.df$X.as.numeric.badScaleCheck..>0])
-geq.dist <- as.numeric(badScaleCheck.geq.felt.df$geq.items.felt.id[badScaleCheck.geq.felt.df$X.as.numeric.badScaleCheck..>0])
-panas.dist <- as.numeric(badScaleCheck.panas.df$panas.items.id[badScaleCheck.panas.df$X.as.numeric.badScaleCheck..>0])
-dass.dist <- as.numeric(badScaleCheck.dass.df$dass.items.id[badScaleCheck.dass.df$X.as.numeric.badScaleCheck..>0])
-asrs.dist <- as.numeric(badScaleCheck.asrs.df$asrs.items.id[badScaleCheck.asrs.df$X.as.numeric.badScaleCheck..>0])
-pgsi.proper.dist <- as.numeric(badScaleCheck.pgsi.proper.df$cpgi.items.proper.id[badScaleCheck.pgsi.proper.df$X.as.numeric.badScaleCheck..>0])
-
-```  
-####Distribution Testing for PANAS####
+### distribution testing for PANAS
 
 ```{r}
 panas.items <- qualtrics.filtered %>% 
   dplyr::select(id,Q93,Q94,Q95,Q96,Q97,Q98,Q99,Q100,Q101,Q102)
-
-
-#na.dass <- apply(is.na(dass.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
 
 panas.items <- drop_na(panas.items)
 
@@ -559,10 +744,10 @@ uniform = rep(NA,nrow(panas.items))
 normal = rep(NA, nrow(panas.items))
 dist = rep(NA, nrow(panas.items))
 nsim = nrow(panas.items)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(panas.items[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(panas.min:panas.max))
-    for(x in panas.min:panas.max) {
+for(i in 1:nsim){
+  temprow = as.numeric(unname(panas.items[i,2:11])) 
+  utable = matrix(0, nrow = 1, ncol = length(panas.min:panas.max))
+  for(x in panas.min:panas.max) {
       utable[x] = length(temprow[ temprow == x])
     }
     uniformest = chisq.test(utable,
@@ -629,19 +814,40 @@ for(i in 1:nsim){
   }
 }
 panas.badDist = as.numeric(panas.badDist)
-
-panas.dist <- as.numeric(qualtrics.filtered$id[panas.badDist>0])
-
-
+panas.badDist
+qualtrics.filtered$badDist.panas <- panas.badDist
 ```
-####Distribution Testing for DASS####
 
+### number of scale options used dass
 ```{r}
 dass.items <- qualtrics.filtered %>% 
   dplyr::select(id,Q104,Q105,Q106,Q107,Q108,Q110,Q112,Q113,Q114,Q115,Q116,Q117,Q118,Q119,Q120,Q121,Q122,Q123,Q124,Q125,Q126)
 
+dass.min=1
+dass.max=4
 
-#na.dass <- apply(is.na(dass.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
+OptUse = function(x){
+  length(table(as.vector(as.matrix(unname(x)))))
+}
+numOpt = apply(dass.items,1,OptUse)
+numOpt = as.numeric(numOpt)
+nsim = length(numOpt)
+badScaleCheck = rep(NA, length(numOpt))
+for(i in 1:nsim){
+  ##more than half of the options
+  optionhalf = length(dass.min:dass.max)/2+1
+  if(numOpt[i] >= optionhalf){
+    badScaleCheck[i] = 1
+  } else { badScaleCheck[i] = 0 }
+}
+badScaleCheck
+qualtrics.filtered$badScaleCheck.dass <- badScaleCheck
+```
+
+### distribution testing for DASS
+```{r}
+dass.items <- qualtrics.filtered %>% 
+  dplyr::select(id,Q104,Q105,Q106,Q107,Q108,Q110,Q112,Q113,Q114,Q115,Q116,Q117,Q118,Q119,Q120,Q121,Q122,Q123,Q124,Q125,Q126)
 
 dass.items <- drop_na(dass.items)
 
@@ -653,7 +859,7 @@ normal = rep(NA, nrow(dass.items))
 dist = rep(NA, nrow(dass.items))
 nsim = nrow(dass.items)
   for(i in 1:nsim){
-    temprow = as.numeric(unname(dass.items[i,2:8])) 
+    temprow = as.numeric(unname(dass.items[i,2:22])) 
     utable = matrix(0, nrow = 1, ncol = length(dass.min:dass.max))
     for(x in dass.min:dass.max) {
       utable[x] = length(temprow[ temprow == x])
@@ -722,206 +928,41 @@ for(i in 1:nsim){
   }
 }
 dass.badDist = as.numeric(dass.badDist)
-
-dass.dist <- as.numeric(qualtrics.filtered$id[dass.badDist>0])
-
+dass.badDist
+qualtrics.filtered$badDist.dass <- dass.badDist
 ```
 
-####Distribution Testing for PGSI since####
-
-```{r}
-pgsi.since.items <- qualtrics.filtered %>% 
-  dplyr::select(id,lottery.since,daily.lottery.since,scratch.since,raffle.since,horses.since,bingo.since,fantasysports.since,casino.themed.app.since,online.slots.since,internet.since)
-
-
-na.pgsi <- apply(is.na(pgsi.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
-
-pgsi.items <- drop_na(pgsi.items)
-
-pgsi.since.min=0
-pgsi.since.max=7
-
-uniform = rep(NA,nrow(pgsi.items))
-normal = rep(NA, nrow(pgsi.items))
-dist = rep(NA, nrow(pgsi.items))
-nsim = nrow(pgsi.items)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(pgsi.items[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(pgsi.min:pgsi.max))
-    for(x in pgsi.min:pgsi.max) {
-      utable[x] = length(temprow[ temprow == x])
-    }
-    uniformest = chisq.test(utable,
-                            rescale.p = T,
-                            simulate.p.value = T)
-    ##test normal distribution
-    ##first convert to z score
-    ztest = scale(temprow)
-    ##then figure out how much of the data is binned for SDs
-    ztable = matrix(0, nrow = 1, ncol = 6)
-    ztable[1] = length(ztest[ ztest <= -2 ])  
-    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
-    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
-    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
-    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
-    ztable[6] = length(ztest[ ztest > 2 ])
-    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
-    normalest = chisq.test(ztable,
-                           p = znormal*sum(ztable),
-                           rescale.p = T,
-                           simulate.p.value = T)
-    ##output return chi square values
-    uniform[i] = uniformest$statistic
-    normal[i] = normalest$statistic
-    ##if uniform < normal
-    if(uniformest$statistic < normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 0 ##uniform is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-    }
-    ##if uniform >= normal
-    if(uniformest$statistic >= normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 1 ##normal is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-        
-    }
-  #0 means uniform fits better
-  #1 means normal fits better
-  #2 means only chose one scale option
-}## end of for loop
-
-####distribution coding####
-pgsi.since.badDist = rep(NA, nsim)
-for(i in 1:nsim){
-  if(dist[i] == 0){
-    pgsi.since.badDist[i] = 1
-  } 
-  if (dist[i] == 1){
-    pgsi.since.badDist[i] = 0
-  } 
-  if (dist[i] == 2) {
-    pgsi.since.badDist[i] = 0
-  }
-}
-pgsi.since.badDist = as.numeric(pgsi.since.badDist)
-
-pgsi.since.dist <- as.numeric(qualtrics.filtered$id[pgsi.since.badDist>0])
-```
-
-###Distribution testing for pgsi.bf
-
-```{r}
-pgsi.bf.items <- qualtrics.filtered %>% 
-  dplyr::select(id,lottery.bf,daily.lottery.fb,scratch.bf,raffle.bf,horses.bf,bingo.bf,fantasysports.bf,casino.themed.app.bf,online.slots.bf,internet.bf)
-
-
-na.pgsi <- apply(is.na(pgsi.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
-
-pgsi.items <- drop_na(pgsi.items)
-
-pgsi.bf.min=1
-pgsi.bf.max=3
-
-uniform = rep(NA,nrow(pgsi.items))
-normal = rep(NA, nrow(pgsi.items))
-dist = rep(NA, nrow(pgsi.items))
-nsim = nrow(pgsi.items)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(pgsi.items[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(pgsi.min:pgsi.max))
-    for(x in pgsi.min:pgsi.max) {
-      utable[x] = length(temprow[ temprow == x])
-    }
-    uniformest = chisq.test(utable,
-                            rescale.p = T,
-                            simulate.p.value = T)
-    ##test normal distribution
-    ##first convert to z score
-    ztest = scale(temprow)
-    ##then figure out how much of the data is binned for SDs
-    ztable = matrix(0, nrow = 1, ncol = 6)
-    ztable[1] = length(ztest[ ztest <= -2 ])  
-    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
-    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
-    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
-    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
-    ztable[6] = length(ztest[ ztest > 2 ])
-    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
-    normalest = chisq.test(ztable,
-                           p = znormal*sum(ztable),
-                           rescale.p = T,
-                           simulate.p.value = T)
-    ##output return chi square values
-    uniform[i] = uniformest$statistic
-    normal[i] = normalest$statistic
-    ##if uniform < normal
-    if(uniformest$statistic < normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 0 ##uniform is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-    }
-    ##if uniform >= normal
-    if(uniformest$statistic >= normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 1 ##normal is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-        
-    }
-  #0 means uniform fits better
-  #1 means normal fits better
-  #2 means only chose one scale option
-}## end of for loop
-
-####distribution coding####
-pgsi.bf.badDist = rep(NA, nsim)
-for(i in 1:nsim){
-  if(dist[i] == 0){
-    pgsi.bf.badDist[i] = 1
-  } 
-  if (dist[i] == 1){
-    pgsi.bf.badDist[i] = 0
-  } 
-  if (dist[i] == 2) {
-    pgsi.bf.badDist[i] = 0
-  }
-}
-pgsi.bf.badDist = as.numeric(pgsi.bf.badDist)
-
-pgsi.bf.dist <- as.numeric(qualtrics.filtered$id[pgsi.bf.badDist>0])
-
-```
-
-####Distribution Testing for ASRS####
-
+### number of scale options used asrs
 ```{r}
 asrs.items <- qualtrics.filtered %>% 
   dplyr::select(id,Q128,Q130,Q131,Q132,Q133)
 
+asrs.min=1
+asrs.max=5
 
-#na.dass <- apply(is.na(dass.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
+OptUse = function(x){
+  length(table(as.vector(as.matrix(unname(x)))))
+}
+numOpt = apply(asrs.items,1,OptUse)
+numOpt = as.numeric(numOpt)
+nsim = length(numOpt)
+badScaleCheck = rep(NA, length(numOpt))
+for(i in 1:nsim){
+  ##more than half of the options
+  optionhalf = length(asrs.min:asrs.max)/2+1
+  if(numOpt[i] >= optionhalf){
+    badScaleCheck[i] = 1
+  } else { badScaleCheck[i] = 0 }
+}
+badScaleCheck
+qualtrics.filtered$badScaleCheck.asrs <- badScaleCheck
+```
+### distribution testing for ASRS
+```{r}
+asrs.items <- qualtrics.filtered %>% 
+  dplyr::select(id,Q128,Q130,Q131,Q132,Q133)
 
-asrs.items <- drop_na(asrs.items)
+#asrs.items <- drop_na(asrs.items)
 
 asrs.min=1
 asrs.max=5
@@ -931,7 +972,7 @@ normal = rep(NA, nrow(asrs.items))
 dist = rep(NA, nrow(asrs.items))
 nsim = nrow(asrs.items)
   for(i in 1:nsim){
-    temprow = as.numeric(unname(asrs.items[i,2:8])) 
+    temprow = as.numeric(unname(asrs.items[i,2:6])) 
     utable = matrix(0, nrow = 1, ncol = length(asrs.min:asrs.max))
     for(x in asrs.min:asrs.max) {
       utable[x] = length(temprow[ temprow == x])
@@ -1000,312 +1041,118 @@ for(i in 1:nsim){
   }
 }
 asrs.badDist = as.numeric(asrs.badDist)
-
-asrs.dist <- as.numeric(qualtrics.filtered$id[asrs.badDist>0])
-
+asrs.badDist
+qualtrics.filtered$badDist.asrs <- asrs.badDist
 ```
-####Distribution testing for GEQ3####
-
-```{r}
-geq3.items <- qualtrics.filtered %>% 
-  dplyr::select(id,pleased,continue.play,game.enjoyable)
-
-
-#na.dass <- apply(is.na(dass.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
-
-geq3.items <- drop_na(geq3.items)
-
-geq3.min=1
-geq3.max=7
-
-uniform = rep(NA,nrow(geq3.items))
-normal = rep(NA, nrow(geq3.items))
-dist = rep(NA, nrow(geq3.items))
-nsim = nrow(geq3.items)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(geq3.items[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(geq3.min:geq3.max))
-    for(x in geq3.min:geq3.max) {
-      utable[x] = length(temprow[ temprow == x])
-    }
-    uniformest = chisq.test(utable,
-                            rescale.p = T,
-                            simulate.p.value = T)
-    ##test normal distribution
-    ##first convert to z score
-    ztest = scale(temprow)
-    ##then figure out how much of the data is binned for SDs
-    ztable = matrix(0, nrow = 1, ncol = 6)
-    ztable[1] = length(ztest[ ztest <= -2 ])  
-    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
-    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
-    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
-    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
-    ztable[6] = length(ztest[ ztest > 2 ])
-    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
-    normalest = chisq.test(ztable,
-                           p = znormal*sum(ztable),
-                           rescale.p = T,
-                           simulate.p.value = T)
-    ##output return chi square values
-    uniform[i] = uniformest$statistic
-    normal[i] = normalest$statistic
-    ##if uniform < normal
-    if(uniformest$statistic < normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 0 ##uniform is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-    }
-    ##if uniform >= normal
-    if(uniformest$statistic >= normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 1 ##normal is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-        
-    }
-  #0 means uniform fits better
-  #1 means normal fits better
-  #2 means only chose one scale option
-}## end of for loop
-
-####distribution coding####
-geq3.badDist = rep(NA, nsim)
-for(i in 1:nsim){
-  if(dist[i] == 0){
-    geq3.badDist[i] = 1
-  } 
-  if (dist[i] == 1){
-    geq3.badDist[i] = 0
-  } 
-  if (dist[i] == 2) {
-    geq3.badDist[i] = 0
-  }
-}
-geq3.badDist = as.numeric(geq3.badDist)
-
-geq3.dist <- as.numeric(qualtrics.filtered$id[geq3.badDist>0])
-
-```
-
-###Distribution testing for GEQlast#####
-
-```{r}
-geqlast.items <- qualtrics.filtered %>% 
-  dplyr::select(id,GEQ3,DQ4,DQ5,GEQ6,DQ7,DQ8,DQ9)
-
-
-#na.dass <- apply(is.na(dass.items), 2, which) #two people have those values missing - not sure how - but need to exclude them from this; later need to check the rest of their data (it's 275991 and 349567, perhaps they were flagged elsewhere)
-
-geqlast.items <- drop_na(geqlast.items)
-
-geqlast.min=1
-geqlast.max=5
-
-uniform = rep(NA,nrow(geqlast.items))
-normal = rep(NA, nrow(geqlast.items))
-dist = rep(NA, nrow(geqlast.items))
-nsim = nrow(geqlast.items)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(geqlast.items[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(geqlast.min:geqlast.max))
-    for(x in geqlast.min:geqlast.max) {
-      utable[x] = length(temprow[ temprow == x])
-    }
-    uniformest = chisq.test(utable,
-                            rescale.p = T,
-                            simulate.p.value = T)
-    ##test normal distribution
-    ##first convert to z score
-    ztest = scale(temprow)
-    ##then figure out how much of the data is binned for SDs
-    ztable = matrix(0, nrow = 1, ncol = 6)
-    ztable[1] = length(ztest[ ztest <= -2 ])  
-    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
-    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
-    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
-    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
-    ztable[6] = length(ztest[ ztest > 2 ])
-    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
-    normalest = chisq.test(ztable,
-                           p = znormal*sum(ztable),
-                           rescale.p = T,
-                           simulate.p.value = T)
-    ##output return chi square values
-    uniform[i] = uniformest$statistic
-    normal[i] = normalest$statistic
-    ##if uniform < normal
-    if(uniformest$statistic < normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 0 ##uniform is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-    }
-    ##if uniform >= normal
-    if(uniformest$statistic >= normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 1 ##normal is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-        
-    }
-  #0 means uniform fits better
-  #1 means normal fits better
-  #2 means only chose one scale option
-}## end of for loop
-
-####distribution coding####
-geqlast.badDist = rep(NA, nsim)
-for(i in 1:nsim){
-  if(dist[i] == 0){
-    geqlast.badDist[i] = 1
-  } 
-  if (dist[i] == 1){
-    geqlast.badDist[i] = 0
-  } 
-  if (dist[i] == 2) {
-    geqlast.badDist[i] = 0
-  }
-}
-geqlast.badDist = as.numeric(geqlast.badDist)
-
-geqlast.dist <- as.numeric(qualtrics.filtered$id[geqlast.badDist>0])
-```
-##Distribution testing for PGSI proper##
+## Create gambling experience and problem variables
 
 ```{r}
 
-cpgi.items.proper <- drop_na(cpgi.items.proper)
+# Identify experienced and novice gamblers 
+qualtrics.filtered$experienced <- ifelse(qualtrics.filtered$cgpi.online.since>0,"AG","NG")
 
-cpgi.proper.min=1
-cpgi.proper.max=4
+# Identify problem and non-problem gambling
+qualtrics.filtered$PG <- ifelse(qualtrics.filtered$pgsi>7,"PG","NPG")
 
-uniform = rep(NA,nrow(cpgi.items.proper))
-normal = rep(NA, nrow(cpgi.items.proper))
-dist = rep(NA, nrow(cpgi.items.proper))
-nsim = nrow(cpgi.items.proper)
-  for(i in 1:nsim){
-    temprow = as.numeric(unname(cpgi.items.proper[i,2:8])) 
-    utable = matrix(0, nrow = 1, ncol = length(cpgi.proper.min:cpgi.proper.max))
-    for(x in cpgi.proper.min:cpgi.proper.max) {
-      utable[x] = length(temprow[ temprow == x])
-    }
-    uniformest = chisq.test(utable,
-                            rescale.p = T,
-                            simulate.p.value = T)
-    ##test normal distribution
-    ##first convert to z score
-    ztest = scale(temprow)
-    ##then figure out how much of the data is binned for SDs
-    ztable = matrix(0, nrow = 1, ncol = 6)
-    ztable[1] = length(ztest[ ztest <= -2 ])  
-    ztable[2] = length(ztest[ ztest > -2 & ztest <= -1  ])
-    ztable[3] = length(ztest[ ztest > -1 & ztest <= 0 ])
-    ztable[4] = length(ztest[ ztest > 0 & ztest <= 1 ])
-    ztable[5] = length(ztest[ ztest > 1 & ztest <= 2 ])
-    ztable[6] = length(ztest[ ztest > 2 ])
-    znormal = c(0.0228, 0.1359, 0.3413, 0.3413, 0.1359, 0.0228)
-    normalest = chisq.test(ztable,
-                           p = znormal*sum(ztable),
-                           rescale.p = T,
-                           simulate.p.value = T)
-    ##output return chi square values
-    uniform[i] = uniformest$statistic
-    normal[i] = normalest$statistic
-    ##if uniform < normal
-    if(uniformest$statistic < normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 0 ##uniform is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-    }
-    ##if uniform >= normal
-    if(uniformest$statistic >= normalest$statistic)
-    {
-      ##if more than 1 option
-      if (numOpt[i]>1)
-      {
-        dist[i] = 1 ##normal is better
-      } else { ##handles when people only pick one thing
-        dist[i] = 2
-      }
-        
-    }
-  #0 means uniform fits better
-  #1 means normal fits better
-  #2 means only chose one scale option
-}## end of for loop
+# Create separate data frames for the groups
+qualtrics.filtered.NG <- filter(qualtrics.filtered, experienced=="NG")
+qualtrics.filtered.AG <- filter(qualtrics.filtered, experienced=="AG")
+qualtrics.filtered.PG <- filter(qualtrics.filtered, PG=="PG")
+qualtrics.filtered.NPG <- filter(qualtrics.filtered, PG=="NPG")
+```
 
-####distribution coding####
-pgsi.proper.badDist = rep(NA, nsim)
-for(i in 1:nsim){
-  if(dist[i] == 0){
-    pgsi.proper.badDist[i] = 1
-  } 
-  if (dist[i] == 1){
-    pgsi.proper.badDist[i] = 0
-  } 
-  if (dist[i] == 2) {
-    pgsi.proper.badDist[i] = 0
-  }
-}
-pgsi.proper.badDist = as.numeric(pgsi.proper.badDist)
+### summary of scale options and distribution checks as a function of group
+```{r}
+opts.dist.summary <- qualtrics.filtered %>%
+  group_by(experienced) %>% 
+  summarise(cpgi_opts=sum(badScaleCheck.cpgi), 
+            cpgi_opts.pt=sum(badScaleCheck.cpgi)/n()*100, 
+            cpgi_dist=sum(badDist.cpgi), 
+            cpgi_dist.pt=sum(badDist.cpgi)/n()*100,
+            pgsi_opts=sum(badScaleCheck.pgsi), 
+            pgsi_opts.pt=sum(badScaleCheck.pgsi)/n()*100,
+            pgsi_dist=sum(badDist.pgsi),
+            pgsi_dist.pt=sum(badDist.pgsi)/n()*100,
+            geq_opts=sum(badScaleCheck.geq),
+            geq_opts.pt=sum(badScaleCheck.geq)/n()*100,
+            geq_dist=sum(badDist.geq), 
+            geq_dist.pt=sum(badDist.geq)/n()*100,
+            panas_opts=sum(badScaleCheck.panas),
+            panas_opts.pt=sum(badScaleCheck.panas)/n()*100,
+            panas_dist=sum(badDist.panas), 
+            panas_dist.pt=sum(badDist.panas)/n()*100,
+            dass_opts=sum(badScaleCheck.dass),
+            dass_opts.pt=sum(badScaleCheck.dass)/n()*100,
+            dass_dist=sum(badDist.dass),
+            dass_dist.pt=sum(badDist.dass)/n()*100,
+            asrs_opts=sum(badScaleCheck.asrs),
+            asrs_opts.pt=sum(badScaleCheck.asrs)/n()*100,
+            asrs_dist=sum(badDist.asrs),
+            asrs_dist.pt=sum(badDist.asrs)/n()*100)
 
-pgsi.proper.dist <- as.numeric(qualtrics.filtered$id[pgsi.proper.badDist>0])
+opts.dist.summary <- t(opts.dist.summary)
+```
+Mean & SD of page submit times
+```{r}
+M_cpgi.page.submit.time <- mean(qualtrics.filtered$Q180_Page.Submit)
+SD_cpgi.page.submit.time <- sd(qualtrics.filtered$Q180_Page.Submit)
+M_geq.page.submit.time <- mean(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
+SD_geq.page.submit.time <- sd(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
+M_panas.page.submit.time <- mean(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
+SD_panas.page.submit.time <- sd(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
+M_dass.page.submit.time <- mean(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
+SD_dass.page.submit.time <- sd(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
+M_asrs.page.submit.time <- mean(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
+SD_asrs.page.submit.time <- sd(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
 
-# M_pgsi.page.submit.time <- mean(qualtrics.filtered$Q180_Page.Submit)
-# SD_pgsi.page.submit.time <- sd(qualtrics.filtered$Q180_Page.Submit)
-# M_geq.page.submit.time <- mean(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
-# SD_geq.page.submit.time <- sd(qualtrics.filtered$Q181_Page.Submit, na.rm = TRUE)
-# M_panas.page.submit.time <- mean(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
-# SD_panas.page.submit.time <- sd(qualtrics.filtered$Q182_Page.Submit, na.rm = TRUE)
-# M_dass.page.submit.time <- mean(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
-# SD_dass.page.submit.time <- sd(qualtrics.filtered$Q183_Page.Submit, na.rm = TRUE)
-# M_asrs.page.submit.time <- mean(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
-# SD_asrs.page.submit.time <- sd(qualtrics.filtered$Q185_Page.Submit, na.rm = TRUE)
-
-
+par(mfrow=c(2,3))
+hist(qualtrics.filtered$Q180_Page.Submit)
+hist(qualtrics.filtered$Q181_Page.Submit)
+hist(qualtrics.filtered$Q182_Page.Submit)
+hist(qualtrics.filtered$Q183_Page.Submit)
+hist(qualtrics.filtered$Q185_Page.Submit)
 
 ```
 
-Gambling experience summary table
+# Gambling experience summary table
 
 ```{r}
-
 # Summary gambling experience
 gam_exp.summary <- qualtrics.filtered %>% 
   group_by(experienced,SF) %>% 
-  summarise(mean.lottery=mean(lottery.since,na.rm=TRUE), sd.lottery=sd(lottery.since,na.rm=TRUE), mean.daily.lottery=mean(daily.lottery.since,na.rm=TRUE),sd.daily.lottery=sd(daily.lottery.since,na.rm=TRUE), mean.scratch=mean(scratch.since,na.rm=TRUE), sd.scratch=sd(scratch.since,na.rm=TRUE),mean.raffle=mean(raffle.since,na.rm=TRUE), sd.raffle=sd(raffle.since,na.rm=TRUE), mean.horses=mean(horses.since,na.rm=TRUE), sd.horses=sd(horses.since,na.rm=TRUE), mean.bingo=mean(bingo.since,na.rm=TRUE), sd.bingo=sd(bingo.since,na.rm=TRUE), mean.fantasysports=mean(fantasysports.since,na.rm=TRUE), sd.fantasysports=sd(fantasysports.since,na.rm=TRUE), mean.casino.themed.app=mean(casino.themed.app.since,na.rm=TRUE), sd.casino.themed.app=sd(casino.themed.app.since,na.rm=TRUE), mean.online.slots=mean(online.slots.since,na.rm=TRUE), sd.online.slots=sd(online.slots.since,na.rm=TRUE), mean.internet=mean(internet.since,na.rm=TRUE), sd.internet=sd(internet.since,na.rm=TRUE), mean.casino.slots=mean(casino.slots,na.rm=TRUE), sd.casino.slots=sd(casino.slots,na.rm=TRUE), mean.poker=mean(poker.since,na.rm=TRUE), sd.poker=sd(poker.since,na.rm=TRUE), mean.roulette=mean( roulette.since,na.rm=TRUE), sd.roulette=sd( roulette.since,na.rm=TRUE),mean.keno=mean(keno.since,na.rm=TRUE), sd.keno=sd(keno.since,na.rm=TRUE),mean.craps=mean(craps.since,na.rm=TRUE), sd.craps=sd(craps.since,na.rm=TRUE), mean.egm.notslots=mean(egm.notslots.since,na.rm=TRUE), sd.egm.notslots=sd(egm.notslots.since,na.rm=TRUE),mean.sports.lottery=mean(sports.lottery.since,na.rm=TRUE), sd.sports.lottery=sd(sports.lottery.since,na.rm=TRUE),mean.sports.pools=mean(sports.pools.since,na.rm=TRUE), sd.sports.pools=sd(sports.pools.since,na.rm=TRUE), mean.card.board.games=mean(card.board.games,na.rm=TRUE), sd.card.board.games=sd(card.board.games,na.rm=TRUE), mean.games.of.skills=mean(games.of.skills.since,na.rm=TRUE), sd.games.of.skills=sd(games.of.skills.since,na.rm=TRUE), mean.sports.bet=mean(sports.bet.since,na.rm=TRUE), sd.sports.bet=sd(sports.bet.since,na.rm=TRUE), mean.stocks=mean(stocks.since,na.rm=TRUE), sd.stocks=sd(stocks.since,na.rm=TRUE))
+  summarise(n(),mean.lottery=mean(lottery.since,na.rm=TRUE), sd.lottery=sd(lottery.since,na.rm=TRUE), mean.daily.lottery=mean(daily.lottery.since,na.rm=TRUE),sd.daily.lottery=sd(daily.lottery.since,na.rm=TRUE), mean.scratch=mean(scratch.since,na.rm=TRUE), sd.scratch=sd(scratch.since,na.rm=TRUE),mean.raffle=mean(raffle.since,na.rm=TRUE), sd.raffle=sd(raffle.since,na.rm=TRUE), mean.horses=mean(horses.since,na.rm=TRUE), sd.horses=sd(horses.since,na.rm=TRUE), mean.bingo=mean(bingo.since,na.rm=TRUE), sd.bingo=sd(bingo.since,na.rm=TRUE), mean.fantasysports=mean(fantasysports.since,na.rm=TRUE), sd.fantasysports=sd(fantasysports.since,na.rm=TRUE), mean.casino.themed.app=mean(casino.themed.app.since,na.rm=TRUE), sd.casino.themed.app=sd(casino.themed.app.since,na.rm=TRUE), mean.online.slots=mean(online.slots.since,na.rm=TRUE), sd.online.slots=sd(online.slots.since,na.rm=TRUE), mean.internet=mean(internet.since,na.rm=TRUE), sd.internet=sd(internet.since,na.rm=TRUE), mean.casino.slots=mean(casino.slots,na.rm=TRUE), sd.casino.slots=sd(casino.slots,na.rm=TRUE), mean.poker=mean(poker.since,na.rm=TRUE), sd.poker=sd(poker.since,na.rm=TRUE), mean.roulette=mean( roulette.since,na.rm=TRUE), sd.roulette=sd( roulette.since,na.rm=TRUE),mean.keno=mean(keno.since,na.rm=TRUE), sd.keno=sd(keno.since,na.rm=TRUE),mean.craps=mean(craps.since,na.rm=TRUE), sd.craps=sd(craps.since,na.rm=TRUE), mean.egm.notslots=mean(egm.notslots.since,na.rm=TRUE), sd.egm.notslots=sd(egm.notslots.since,na.rm=TRUE),mean.sports.lottery=mean(sports.lottery.since,na.rm=TRUE), sd.sports.lottery=sd(sports.lottery.since,na.rm=TRUE),mean.sports.pools=mean(sports.pools.since,na.rm=TRUE), sd.sports.pools=sd(sports.pools.since,na.rm=TRUE), mean.card.board.games=mean(card.board.games,na.rm=TRUE), sd.card.board.games=sd(card.board.games,na.rm=TRUE), mean.games.of.skills=mean(games.of.skills.since,na.rm=TRUE), sd.games.of.skills=sd(games.of.skills.since,na.rm=TRUE), mean.sports.bet=mean(sports.bet.since,na.rm=TRUE), sd.sports.bet=sd(sports.bet.since,na.rm=TRUE), mean.stocks=mean(stocks.since,na.rm=TRUE), sd.stocks=sd(stocks.since,na.rm=TRUE))
 
-write.csv(gam_exp.summary,"gam_exp.summary.csv")
+write.csv(gam_exp.summary,"gam_exp_summary_QC.csv")
+```
 
+# Gambling experience PCA (exploratory)
+
+Two components explain 72.5%, with the first explaining nearly 64%. The first component essentially represents gambling across all modalities. The second component represents (not)gambling on casino games. Casino variables are negatively correlated with the other games (possibly an artifact of some participants completing the study after casino reopening).
+
+```{r}
+gam_exp4pca <- qualtrics.filtered %>% 
+  dplyr::select(lottery.since, daily.lottery.since,scratch.since, raffle.since, horses.since, bingo.since, fantasysports.since,casino.themed.app.since,online.slots.since,internet.since,casino.slots,poker.since,roulette.since,keno.since,craps.since,egm.notslots.since,sports.lottery.since,sports.pools.since,card.board.games,games.of.skills.since,sports.bet.since,stocks.since)
+
+gam_exp4pca.norm <- scale(gam_exp4pca)
+data.pca <- princomp(gam_exp4pca.norm)
+summary(data.pca)
+
+data.pca$loadings[, 1:2]
+fviz_eig(data.pca, addlabels = TRUE)
+fviz_cos2(data.pca, choice = "var", axes = 1:2)
+
+fviz_pca_var(data.pca, col.var = "cos2",
+            gradient.cols = c("black", "orange", "green"),
+            repel = TRUE)
+
+fviz_pca_var(data.pca, col.var = "black")
+pca.df <- data.frame(data.pca$scores[,1:2])
 
 ```
 Check for duplicates
 ```{r}
-#Check for duplicate MTURK IDs (Q188)
-#qualtrics.filtered$Q188[duplicated(qualtrics.filtered$Q188)] #find all the duplicates
+# Check for duplicate MTURK IDs (Q188)
+qualtrics.filtered$Q188[duplicated(qualtrics.filtered$Q188)] #find all the duplicates
 
 # examine duplicates one by one if necessary
 #which(qualtrics.filtered$Q188=="A5NE8TWS8ZV7B") #rows 
@@ -1323,22 +1170,199 @@ Check for duplicates
 
 ```
 
-Create gambling experience variable
+# Demographics tables & figures
 
 ```{r}
-# Identify experienced and novice gamblers
-qualtrics.filtered$experienced <- ifelse(qualtrics.filtered$cgpi.online.since>0,"AG","NG")
+#Summary: gender, employment, country, income, ethnicity
 
+unique(qualtrics.filtered$country)
+
+qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
+                                                ifelse(qualtrics.filtered$country=="Italy"|qualtrics.filtered$country=="Italia"|qualtrics.filtered$country=="italy","Italy",
+                                          ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
+                                                              ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil",
+                                                                     ifelse(qualtrics.filtered$country=="London","UK",
+                                                                            ifelse(qualtrics.filtered$country=="Estonia","Estonia",
+                                                                                   ifelse(qualtrics.filtered$country=="Spain","Spain","Germany")))))))
+
+qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
+                                                       ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
+                                                    ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil","Other")))
+
+#Country
+country.summary <- qualtrics.filtered %>% 
+  group_by(country.recoded,experienced,SF) %>% 
+  summarise(number=n())
+write.csv(country.summary,"country.summary.csv")
+
+#p <- ggplot(country.summary, aes(x="", y=percent, fill = country.recoded)) +
+#  geom_bar(stat = "identity",width=1,color="white") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
+#  theme_void()+
+#  scale_fill_brewer(palette="Set2")
+#p
+
+#ggsave(filename="cleo_countries.tiff", plot=p, width = 10, height = 4.5 )
+
+gender.summary <- qualtrics.filtered %>% 
+  group_by(gender,experienced,SF) %>% 
+  summarise(n=n())
+write.csv(gender.summary,"gender.summary.csv")
+
+
+qualtrics.filtered$age <- as.numeric(qualtrics.filtered$age)
+qualtrics.filtered$age<-na_if(qualtrics.filtered$age,3)
+hist(qualtrics.filtered$age)
+
+#t.test(qualtrics.filtered$age~qualtrics.filtered$SF)
+#DO ANOVA INSTEAD
+
+age.summary <- qualtrics.filtered %>% 
+  group_by(experienced,SF) %>% 
+  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
+write.csv(age.summary,"age.summary.csv")
+
+age.summary <- qualtrics.filtered %>% 
+  group_by(experienced) %>% 
+  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
+
+qualtrics.filtered$ethnicity.recoded <- ifelse(qualtrics.filtered$ethnicity==1,"White",
+                                                   ifelse(qualtrics.filtered$ethnicity==2, "Black or African American",
+                                                          ifelse(qualtrics.filtered$ethnicity==3,"American Indian or Alaska Native",
+                                                                 ifelse(qualtrics.filtered$ethnicity==4,"Asian",
+                                                                        ifelse(qualtrics.filtered$ethnicity==5,"Native Hawaiian or Pacific Islander",
+                                                                               ifelse(qualtrics.filtered$ethnicity==6,"Hispanic/Latino(a)",
+                                                                                      ifelse(qualtrics.filtered$ethnicity==7,"Other","Multiracial")))))))
+ethnicity.summary <- qualtrics.filtered %>% 
+  group_by(ethnicity.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+qualtrics.filtered$employment.recoded <- ifelse(qualtrics.filtered$employment==1,"working, paid employee",
+                                                   ifelse(qualtrics.filtered$employment==2, "working, self-employed",
+                                                          ifelse(qualtrics.filtered$employment==3,"temporary layoff",
+                                                                 ifelse(qualtrics.filtered$employment==4,"looking for work",
+                                                                        ifelse(qualtrics.filtered$employment==5,"not working, retired",
+                                                                               ifelse(qualtrics.filtered$employment==6,"not working, disabled",
+                                                                                      ifelse(qualtrics.filtered$employment==7,"not working, other","prefer not to answer")))))))
+
+#Employment
+employment.summary <- qualtrics.filtered %>% 
+  group_by(employment.recoded,experienced,SF) %>% 
+  summarise(number=n())
+write.csv(employment.summary,"employment.summary.csv")
+
+#p.e <- ggplot(employment.summary, aes(x="", y=percent, fill = employment.recoded)) +
+#  geom_bar(stat = "identity",width=1,color="black") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
+#  theme_void()+
+#  scale_fill_brewer(palette="Set2")
+#p.e
+
+#ggsave(filename="cleo_employment.tiff", plot=p.e, width = 10, height = 4.5 )
+
+qualtrics.filtered$income.recoded <- ifelse(qualtrics.filtered$income==1,"< 10K",
+                                               ifelse(qualtrics.filtered$income==2,"10K-19K",
+                                                      ifelse(qualtrics.filtered$income==3,"20K-29K",
+                                                             ifelse(qualtrics.filtered$income==4,"30K-39K",
+                                                                    ifelse(qualtrics.filtered$income==5,"40K-49K",
+                                                                           ifelse(qualtrics.filtered$income==6,"50K-59K",
+                                                                                  ifelse(qualtrics.filtered$income==7,"60K-69K",
+                                                                                         ifelse(qualtrics.filtered$income==8,"70K-79K",
+                                                                                                ifelse(qualtrics.filtered$income==9,"80K-89K",
+                                                                                                       ifelse(qualtrics.filtered$income==10,"90K-99K",
+                                                                                                              ifelse(qualtrics.filtered$income==11,"100K-149K",">=150K")))))))))))
+
+qualtrics.filtered$groupedincome.recoded <- ifelse(qualtrics.filtered$income==1 | qualtrics.filtered$income==2 | qualtrics.filtered$income==3 |qualtrics.filtered$income==4 |qualtrics.filtered$income==5 ,"< 10K-49K",                                   ifelse(qualtrics.filtered$income==6|qualtrics.filtered$income==7|qualtrics.filtered$income==8|qualtrics.filtered$income==9|qualtrics.filtered$income==10,"50K-99K",">=100K"))
+
+income.summary <- qualtrics.filtered %>% 
+  group_by(groupedincome.recoded,experienced,SF) %>% 
+  summarise(number=n())
+
+rearrange <- c(1,12,11,2,3,4,5,6,7,8,9,10)
+income.summary$rearrange <- rearrange
+income.summary <- income.summary %>% 
+  arrange(rearrange)
+write.csv(income.summary,"income.csv")
+
+#Income
+
+#p.i <- ggplot(income.summary, aes(income.recoded, x=rearrange, y=percent)) +
+#  geom_bar(stat = "identity",fill="black") + theme_bw()+
+#  scale_x_discrete(labels=c("1" = "<10k", "2" = "10K-19K"))+
+#  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+#  theme(panel.border= element_blank()) +
+#  theme(axis.line.x = element_line(color="black", size = 0.5),
+#        axis.line.y = element_line(color="black", size = 0.5), 
+#        axis.text.x=element_text(angle=0, size=12, face="bold", vjust=0.5),
+#        axis.text.y=element_text(angle=0, size=12, vjust=0.5),
+#        axis.title=element_text(size=14)) + xlab("Income bracket") + ylab("%") 
+#p.i
+#ggsave(filename="cleo_income.tiff", plot=p.i)
+
+p.g <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=cgpi.total.since, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=16)) + ylab("Gambling frequency since pandemic") 
+p.g
+ggsave(filename="cleo_gambling_frequency.tiff", plot=p.g)
+
+p.go <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=cgpi.online.since, fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
+        axis.title=element_text(size=14)) + ylab("Online gambling frequency since pandemic") 
+p.go
+#ggsave(filename="cleo_online_gambling_frequency.tiff", plot=p.go)
+
+p.pgsi <- qualtrics.filtered %>% 
+  ggplot(aes(x=experienced, y=pgsi,fill=SF)) +
+  geom_boxplot(alpha=0.6) +
+  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
+  xlab("") +
+  #scale_x_discrete(labels=(c("SF+","SF-")))+
+  scale_y_continuous(breaks=c(0,3,8,21))+
+  scale_colour_manual(values=c("black", "orange")) +
+  scale_fill_manual(values=c("grey", "orange")) + 
+  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
+  theme(panel.border= element_blank()) +
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+        axis.line.y = element_line(color="black", size = 0.5), 
+        axis.text.x=element_text(angle=0, size=18, face="bold", vjust=0.5),
+        axis.text.y=element_text(angle=0, size=18, vjust=0.5),
+      axis.title=element_text(size=18)) + ylab("Problem gambling severity index")
+p.pgsi
+ggsave(filename="cleo_pgsi.tiff", plot=p.pgsi)
 ```
-## Chi squared demographics
+# Demographics analyses
 
 ```{r}
-M <- as.table(rbind(c(762, 327, 468), c(484, 239, 477)))
+#Gender Chi squared
 
 males <- c(94,86,86,80)
 females <- c(46,40,55,58)
-gender.table <- rbind(males, females)
-dimnames(gender.table) <- list(gender=c("M","F"), group=c("sf-AG", "SF+AG", "SF-NG", "SF+NG"))
+nonbinary <- c(0,1,1,0)
+noanswer <- c(0,1,0,1)
+gender.table <- rbind(males, females, nonbinary, noanswer)
+dimnames(gender.table) <- list(gender=c("M","F","nonbin","noanswer"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
 
 chisq.test(gender.table)
 
@@ -1349,7 +1373,7 @@ Other <- c(11,5,8,6)
 country.table <- rbind(USA, India, Brazil, Other)
 dimnames(country.table) <- list(country=c("U","I","B","O"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
 
-chisq.test(Other)
+chisq.test(country.table)
 
 
 Lower <- c(82,72,82,94)
@@ -1358,7 +1382,7 @@ Upper <- c(10,11,10,5)
 income.table <- rbind(Lower,Middle,Upper)
 dimnames(income.table) <- list(income=c("I","M","U"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
 
-chisq.test(Upper)
+chisq.test(income.table)
 
 White <- c(96,83,115,111)
 Black <- c(4,5,2,8)
@@ -1369,17 +1393,31 @@ Other <- c(7,10,5,3)
 ethnicity.table <- rbind(White,Black,Asian,AmerInd,Hispanic,Other)
 dimnames(ethnicity.table) <- list(ethnicity=c("W","B","A","AI","H","O"), group=c("SF-AG", "SF+AG", "SF-NG", "SF+NG"))
 
+chisq.test(ethnicity.table)
+chisq.test(White)
+chisq.test(Black)
+chisq.test(Asian)
+chisq.test(AmerInd)
+chisq.test(Hispanic)
 chisq.test(Other)
 
 Not <- c(1,5,14,10)
 WP <- c(97,91,98,91)
 WSE <- c(39,29,29,28)
+na <- c(1,0,1,0)
+employment.table <- rbind(Not,WP,WSE,na)
+dimnames(employment.table) <- list(employment=c("Not","WP","WSE","na"), group=c("SF-AG","SF+AG","SF-NG","SF+NG"))
 
-chisq.test(WSE)
+chisq.test(employment.table)
+#chisq.test(Not)
+
+anova <- aov(age ~ experienced*SF, data = qualtrics.filtered)
+summary(anova)
+report(anova)
 
 ```
 
-## Examine gambling experience variable distribution. Run MANOVA
+# Examine gambling experience variable distribution. Run MANOVA
 
 Really, the way to do this would be a data reduction approach - run a PCA and then compare factor scores across participants
 
@@ -1393,10 +1431,12 @@ summary(ml.gam.exp)
 
 ```
 
-Histograms: Self-report measures
+# Histograms: Self-report measures
 
 ```{r}
 par(mfrow=c(4,4))
+par(mar = c(4, 4, 2, 2))
+
 hist(as.numeric(qualtrics.filtered$age),breaks = 20)
 hist(qualtrics.filtered$win.est,breaks = 20)
 hist(qualtrics.filtered$pleased,breaks = 20)
@@ -1415,6 +1455,8 @@ hist(qualtrics.filtered$dass.depression,breaks = 20)
 hist(qualtrics.filtered$ASRS,breaks = 20)
 
 histogram(sqrt(qualtrics.filtered$win.est))
+histogram(sqrt(qualtrics.filtered$avg_immersion)) #looks a bit more normal than original dist
+histogram(qualtrics.filtered$avg_immersion)
 ```
 
 Transform and center variables
@@ -1450,7 +1492,7 @@ cleo.df.filtered <- cleo.df %>%
   filter(id %in% qualtrics.filtered$id)
 
 qualtrics.qs <- qualtrics.filtered %>% 
-  dplyr::select(id,gender,pgsi.demeaned,cgpi.total.since,cgpi.online.since,ASRS.demeaned,dass.depression.demeaned,dass.stress.demeaned,dass.anxiety.demeaned,pgsi,experienced)
+  dplyr::select(id,gender,pgsi.demeaned,cgpi.total.since,cgpi.online.since,ASRS.demeaned,dass.depression.demeaned,dass.stress.demeaned,dass.anxiety.demeaned,pgsi,experienced,PG)
 
 cleo.df.qualtrics <- inner_join(cleo.df.filtered, qualtrics.qs, by="id") #combine with Cleo data
 
@@ -1472,7 +1514,8 @@ cleo.df.qualtrics$pr_win <- ifelse(cleo.df.qualtrics$pr_win_loss <0,0,1)
 
 #define sequences of wins or losses
 
-sq <- seq(1,109800,200)
+#sq <- seq(1,109800,200)
+sq <- seq(1,59600,200) #rows: dim(cleo.df.qualtrics)[1]
 continual <- data.frame(continual=0)
 
 for (i in sq) {
@@ -1491,27 +1534,23 @@ continual$continualloss <- ifelse(cleo.df.qualtrics$pr_loss==0,0,continual$conti
 cleo.df.qualtrics$continualwin <- continual$continualwin
 cleo.df.qualtrics$continualloss <- continual$continualloss
 
-#Identify PGs and NPGs
-
-cleo.df.qualtrics$PG <- ifelse(cleo.df.qualtrics$pgsi<8,"NPG","PG")
-
 ```
 
-Create Qualtrics and Cleo subsets based on gambling experience
+Create Cleo subsets based on gambling experience & problems
 
 ```{r}
-
-qualtrics.expgamblers <- qualtrics.filtered %>% 
-  filter(cgpi.online.since>0)
-
-qualtrics.novices <- qualtrics.filtered %>% 
-  filter(cgpi.online.since==0)
 
 cleo.df.qualtrics.exp <- cleo.df.qualtrics %>% 
   filter(experienced=="AG")
 
 cleo.df.qualtrics.nov <- cleo.df.qualtrics %>% 
   filter(experienced=="NG")
+
+cleo.df.qualtrics.PG <- cleo.df.qualtrics %>% 
+  filter(PG=="PG")
+
+cleo.df.qualtrics.NPG <- cleo.df.qualtrics %>% 
+  filter(PG=="NPG")
 
 ```
 
@@ -1617,13 +1656,17 @@ p.3
 p.4 <- plot_model(ml,type="pred", terms="gender",pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Gender")+ylab("Bet size")+theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank(),legend.title = element_blank(),panel.spacing = unit(2, "lines"))
 p.4
 
+ml.1 = glmer(bet_per_line ~ SF*starting_credits*PG + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id) + (0+starting_credits_scaled|id), data=cleo.df.qualtrics,family = "poisson")
+summary(ml.1)
+
+plot_model(ml.1,type="pred", terms=c("starting_credits","SF","PG"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Current $")+ylab("Bet size")+my_theme
+
 ```
 
 ## Negative binomial: Celo data model: bet sizes
 Results are largely the same as Poisson
 
 ```{r}
-
 ml.nb = glmer.nb(bet_per_line ~ SF*starting_credits_scaled*experienced + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id)+(0+starting_credits_scaled|id), data=cleo.df.qualtrics)
 summary(ml.nb)
 
@@ -1640,6 +1683,26 @@ ggsave(filename="Bet size graph.jpeg", plot=p.2, width = 7, height = 4.5 )
 ggsave(filename="Bet size graph ADHD.jpeg", plot=p.5, width = 7, height = 4.5 )
 ggsave(filename="Bet size graph DASS.jpeg", plot=p.5, width = 7, height = 4.5 )
 ```
+
+## Bet changes
+```{r}
+cleo.df.qualtrics$pr_win_loss_scaled <- scale(cleo.df.qualtrics$pr_win_loss)
+ml.ag <- glmer(bet_changes ~ SF*pr_win_loss_scaled*experienced + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id)+(0+pr_win_loss_scaled|id), data=cleo.df.qualtrics, family = binomial)
+summary(ml.ag)
+
+plot_model(ml.bc,type="pred", terms=c("pr_win_loss_scaled","SF","experienced"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Prior outcome")+ylab("p(Bet change")+theme_bw() +my_theme
+
+ml.bcpg <- glmer(bet_changes ~ SF*pr_win_loss_scaled*PG + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id)+(0+pr_win_loss_scaled|id), data=cleo.df.qualtrics, family = binomial)
+summary(ml.bcpg)
+
+plot_model(ml.bcpg,type="pred", terms=c("pr_win_loss_scaled","SF","PG"),pred.type="fe", grid = FALSE, colors=c("black","orangered"))+xlab("Prior outcome")+ylab("p(Bet change")+theme_bw() +my_theme
+
+ml.bc <- glmer(bet_changes ~ SF*pr_win_loss_scaled + sequence + ASRS.demeaned + dass.depression.demeaned + gender + (1|id)+(0+pr_win_loss_scaled|id), data=cleo.df.qualtrics, family = binomial)
+summary(ml.bc)
+
+```
+
+
 
 ## Cleo data models: spin initiation latencies
 
@@ -1698,6 +1761,19 @@ summary(ml.prp.nbc.AG) #post-reinforcement pauses only evident in the presence o
 
 ml.prp.nbc.NG = lmer(log_spin_init_latency ~ pr_win_loss_scaled+(0+pr_win_loss|id)+(1|id),data=filter(cleo.df.qualtrics.nobetchanges,experienced=="NG")) 
 summary(ml.prp.nbc.NG)
+
+#analysis with PG vs NPG
+ml.prp = lmer(log_spin_init_latency ~ pr_win_loss*SF*PG + sequence + bet_changes + ASRS.demeaned + dass.depression.demeaned + gender+(0+pr_win_loss|id)+(1|id), data=cleo.df.qualtrics) 
+summary(ml.prp)
+
+p.prp <- plot_model(ml.prp,type="pred", terms=c("pr_win_loss","PG"),pred.type="fe", grid = FALSE, colors=c("cyan","magenta"))+xlab("Prior outcome")+ylab("Ln(spin initiation latency)")+my_theme
+p.prp
+
+ml.prp.pg = lmer(log_spin_init_latency ~ pr_win_loss*SF + sequence + bet_changes + ASRS.demeaned + dass.depression.demeaned + gender+(0+pr_win_loss|id)+(1|id), data=filter(cleo.df.qualtrics, PG=="PG")) 
+summary(ml.prp.pg)
+
+ml.prp.npg = lmer(log_spin_init_latency ~ pr_win_loss*SF + sequence + bet_changes + ASRS.demeaned + dass.depression.demeaned + gender+(0+pr_win_loss|id)+(1|id), data=filter(cleo.df.qualtrics, PG=="NPG")) 
+summary(ml.prp.npg)
 
 ```
 
@@ -2051,183 +2127,7 @@ ggsave(filename="n_affect.tiff", plot=p.n_affect)
 # Demographics
 
 ```{r}
-#Summary: gender, employment, country, income, ethnicity
 
-unique(qualtrics.filtered$country)
-
-qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
-                                                ifelse(qualtrics.filtered$country=="Italy"|qualtrics.filtered$country=="Italia"|qualtrics.filtered$country=="italy","Italy",
-                                                       ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
-                                                              ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil",
-                                                                     ifelse(qualtrics.filtered$country=="London","UK",
-                                                                            ifelse(qualtrics.filtered$country=="Estonia","Estonia",
-                                                                                   ifelse(qualtrics.filtered$country=="Spain","Spain","Germany")))))))
-
-qualtrics.filtered$country.recoded <- ifelse(qualtrics.filtered$country=="USA"|qualtrics.filtered$country=="united states"|qualtrics.filtered$country=="Unite States"|qualtrics.filtered$country=="United States"|qualtrics.filtered$country=="United Staes"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="Virginia"|  qualtrics.filtered$country=="michigan"|qualtrics.filtered$country=="america"|qualtrics.filtered$country=="Unites States"|qualtrics.filtered$country=="United states"|qualtrics.filtered$country=="United States of America"|qualtrics.filtered$country=="us"|qualtrics.filtered$country=="United States "|qualtrics.filtered$country=="United Stats"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="US"|qualtrics.filtered$country=="usa"|qualtrics.filtered$country=="UNITED STATES"|qualtrics.filtered$country=="FL"|qualtrics.filtered$country=="CA"|qualtrics.filtered$country=="ca"|qualtrics.filtered$country=="Columbus"|qualtrics.filtered$country=="New Jersey"|qualtrics.filtered$country=="Arkansas"|qualtrics.filtered$country=="LAS VEGAS"|qualtrics.filtered$country=="Washington"|qualtrics.filtered$country=="Missouri"|qualtrics.filtered$country=="ID"|qualtrics.filtered$country=="GA"|qualtrics.filtered$country=="new york","USA",
-                                                       ifelse(qualtrics.filtered$country=="INDIA"|qualtrics.filtered$country=="India"|qualtrics.filtered$country=="india"|qualtrics.filtered$country=="India "|qualtrics.filtered$country=="india "|qualtrics.filtered$country=="Indian","India",
-                                                    ifelse(qualtrics.filtered$country=="Brazil"|qualtrics.filtered$country=="Brasil","Brazil","Other")))
-
-#Country
-country.summary <- qualtrics.filtered %>% 
-  group_by(country.recoded,experienced,SF) %>% 
-  summarise(number=n())
-
-p <- ggplot(country.summary, aes(x="", y=percent, fill = country.recoded)) +
-  geom_bar(stat = "identity",width=1,color="white") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
-  theme_void()+
-  scale_fill_brewer(palette="Set2")
-p
-
-ggsave(filename="cleo_countries.tiff", plot=p, width = 10, height = 4.5 )
-
-gender.summary <- qualtrics.filtered %>% 
-  group_by(gender,experienced,SF) %>% 
-  summarise(n=n())
-
-write.csv(gender.summary,"gender.summary.csv")
-
-
-qualtrics.filtered$age <- as.numeric(qualtrics.filtered$age)
-qualtrics.filtered$age<-na_if(qualtrics.filtered$age,3)
-hist(qualtrics.filtered$age)
-
-t.test(qualtrics.filtered$age~qualtrics.filtered$SF)
-
-
-
-age.summary <- qualtrics.filtered %>% 
-  group_by(experienced,SF) %>% 
-  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
-
-age.summary <- qualtrics.filtered %>% 
-  group_by(experienced) %>% 
-  summarise(mean.age=mean(age,na.rm=TRUE), sd.age=sd(age,na.rm=TRUE), min.age=min(age,na.rm=TRUE),max.age=max(age,na.rm=TRUE), median(age, na.rm=TRUE))
-
-qualtrics.filtered$ethnicity.recoded <- ifelse(qualtrics.filtered$ethnicity==1,"White",
-                                                   ifelse(qualtrics.filtered$ethnicity==2, "Black or African American",
-                                                          ifelse(qualtrics.filtered$ethnicity==3,"American Indian or Alaska Native",
-                                                                 ifelse(qualtrics.filtered$ethnicity==4,"Asian",
-                                                                        ifelse(qualtrics.filtered$ethnicity==5,"Native Hawaiian or Pacific Islander",
-                                                                               ifelse(qualtrics.filtered$ethnicity==6,"Hispanic/Latino(a)",
-                                                                                      ifelse(qualtrics.filtered$ethnicity==7,"Other","Multiracial")))))))
-ethnicity.summary <- qualtrics.filtered %>% 
-  group_by(ethnicity.recoded,experienced,SF) %>% 
-  summarise(number=n())
-
-qualtrics.filtered$employment.recoded <- ifelse(qualtrics.filtered$employment==1,"working, paid employee",
-                                                   ifelse(qualtrics.filtered$employment==2, "working, self-employed",
-                                                          ifelse(qualtrics.filtered$employment==3,"temporary layoff",
-                                                                 ifelse(qualtrics.filtered$employment==4,"looking for work",
-                                                                        ifelse(qualtrics.filtered$employment==5,"not working, retired",
-                                                                               ifelse(qualtrics.filtered$employment==6,"not working, disabled",
-                                                                                      ifelse(qualtrics.filtered$employment==7,"not working, other","prefer not to answer")))))))
-
-#Employment
-employment.summary <- qualtrics.filtered %>% 
-  group_by(employment.recoded,experienced,SF) %>% 
-  summarise(number=n())
-
-p.e <- ggplot(employment.summary, aes(x="", y=percent, fill = employment.recoded)) +
-  geom_bar(stat = "identity",width=1,color="black") + coord_polar("y", start=0) + theme_bw() + theme(legend.position = "none")+theme(panel.border= element_blank())+
-  theme_void()+
-  scale_fill_brewer(palette="Set2")
-p.e
-
-ggsave(filename="cleo_employment.tiff", plot=p.e, width = 10, height = 4.5 )
-
-qualtrics.filtered$income.recoded <- ifelse(qualtrics.filtered$income==1,"< 10K",
-                                               ifelse(qualtrics.filtered$income==2,"10K-19K",
-                                                      ifelse(qualtrics.filtered$income==3,"20K-29K",
-                                                             ifelse(qualtrics.filtered$income==4,"30K-39K",
-                                                                    ifelse(qualtrics.filtered$income==5,"40K-49K",
-                                                                           ifelse(qualtrics.filtered$income==6,"50K-59K",
-                                                                                  ifelse(qualtrics.filtered$income==7,"60K-69K",
-                                                                                         ifelse(qualtrics.filtered$income==8,"70K-79K",
-                                                                                                ifelse(qualtrics.filtered$income==9,"80K-89K",
-                                                                                                       ifelse(qualtrics.filtered$income==10,"90K-99K",
-                                                                                                              ifelse(qualtrics.filtered$income==11,"100K-149K",">=150K")))))))))))
-
-qualtrics.filtered$groupedincome.recoded <- ifelse(qualtrics.filtered$income==1 | qualtrics.filtered$income==2 | qualtrics.filtered$income==3 |qualtrics.filtered$income==4 |qualtrics.filtered$income==5 ,"< 10K-49K",                                   ifelse(qualtrics.filtered$income==6|qualtrics.filtered$income==7|qualtrics.filtered$income==8|qualtrics.filtered$income==9|qualtrics.filtered$income==10,"50K-99K",">=100K"))
-
-income.summary <- qualtrics.filtered %>% 
-  group_by(groupedincome.recoded,experienced,SF) %>% 
-  summarise(number=n())
-
-rearrange <- c(1,12,11,2,3,4,5,6,7,8,9,10)
-income.summary$rearrange <- rearrange
-income.summary <- income.summary %>% 
-  arrange(rearrange)
-write.csv(income.summary,"income.csv")
-
-#Income
-
-p.i <- ggplot(income.summary, aes(income.recoded, x=rearrange, y=percent)) +
-  geom_bar(stat = "identity",fill="black") + theme_bw()+
-  scale_x_discrete(labels=c("1" = "<10k", "2" = "10K-19K"))+
-  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
-  theme(panel.border= element_blank()) +
-  theme(axis.line.x = element_line(color="black", size = 0.5),
-        axis.line.y = element_line(color="black", size = 0.5), 
-        axis.text.x=element_text(angle=0, size=12, face="bold", vjust=0.5),
-        axis.text.y=element_text(angle=0, size=12, vjust=0.5),
-        axis.title=element_text(size=14)) + xlab("Income bracket") + ylab("%") 
-p.i
-ggsave(filename="cleo_income.tiff", plot=p.i)
-
-p.g <- qualtrics.filtered %>% 
-  ggplot(aes(x=experienced, y=cgpi.total.since, fill=SF)) +
-  geom_boxplot(alpha=0.6) +
-  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
-  xlab("") +
-  #scale_x_discrete(labels=(c("SF+","SF-")))+
-  scale_colour_manual(values=c("black", "orange")) +
-  scale_fill_manual(values=c("grey", "orange")) + 
-  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
-  theme(panel.border= element_blank()) +
-  theme(axis.line.x = element_line(color="black", size = 0.5),
-        axis.line.y = element_line(color="black", size = 0.5), 
-        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
-        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
-        axis.title=element_text(size=16)) + ylab("Gambling frequency since pandemic") 
-p.g
-ggsave(filename="cleo_gambling_frequency.tiff", plot=p.g)
-
-p.go <- qualtrics.filtered %>% 
-  ggplot(aes(x=experienced, y=cgpi.online.since, fill=SF)) +
-  geom_boxplot(alpha=0.6) +
-  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(),shape=21, size=3, colour="black")+
-  xlab("") +
-  #scale_x_discrete(labels=(c("SF+","SF-")))+
-  scale_colour_manual(values=c("black", "orange")) +
-  scale_fill_manual(values=c("grey", "orange")) + 
-  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
-  theme(panel.border= element_blank()) +
-  theme(axis.line.x = element_line(color="black", size = 0.5),
-        axis.line.y = element_line(color="black", size = 0.5), 
-        axis.text.x=element_text(angle=0, size=14, face="bold", vjust=0.5),
-        axis.text.y=element_text(angle=0, size=14, vjust=0.5),
-        axis.title=element_text(size=14)) + ylab("Online gambling frequency since pandemic") 
-p.go
-ggsave(filename="cleo_online_gambling_frequency.tiff", plot=p.go)
-
-p.pgsi <- qualtrics.filtered %>% 
-  ggplot(aes(x=experienced, y=pgsi,fill=SF)) +
-  geom_boxplot(alpha=0.6) +
-  geom_jitter(aes(colour=SF,group=SF), position = position_jitterdodge(), shape=21, size=3, colour="black")+
-  xlab("") +
-  #scale_x_discrete(labels=(c("SF+","SF-")))+
-  scale_y_continuous(breaks=c(0,3,8,21))+
-  scale_colour_manual(values=c("black", "orange")) +
-  scale_fill_manual(values=c("grey", "orange")) + 
-  theme_bw() +theme(plot.background = element_blank(),panel.grid.major = element_blank(),panel.grid.minor = element_blank()) + 
-  theme(panel.border= element_blank()) +
-  theme(axis.line.x = element_line(color="black", size = 0.5),
-        axis.line.y = element_line(color="black", size = 0.5), 
-        axis.text.x=element_text(angle=0, size=18, face="bold", vjust=0.5),
-        axis.text.y=element_text(angle=0, size=18, vjust=0.5),
-      axis.title=element_text(size=18)) + ylab("Problem gambling severity index")
-p.pgsi
-ggsave(filename="cleo_pgsi.tiff", plot=p.pgsi)
 
 ```
 
